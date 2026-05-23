@@ -1,0 +1,3 @@
+Acessar banco de dados no docker:
+docker exec -it bpo_postgres psql -U postgres -d bpo_db
+
