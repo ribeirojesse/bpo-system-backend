@@ -70,6 +70,7 @@ class AccountsPayableService:
 
             subcategory = ExpenseSubcategoryRepository.get_by_id(
                 db,
+                current_user.tenant_id,
                 data.subcategory_id
             )
 

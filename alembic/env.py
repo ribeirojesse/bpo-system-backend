@@ -11,6 +11,7 @@ from app.core.database import Base
 # IMPORTAR MODELS
 from app.models.tenant import Tenant
 from app.models.user import User
+from app.models.refresh_token import RefreshToken
 from app.models.client import Client
 from app.models.financial_contact import FinancialContact
 from app.models.expense_category import ExpenseCategory

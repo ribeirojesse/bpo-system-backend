@@ -59,4 +59,13 @@ class User(Base):
         default=True
     )
 
-    tenant = relationship("Tenant")
+    tenant = relationship(
+        "Tenant"
+    )
+
+    refresh_tokens = relationship(
+        "RefreshToken",
+        back_populates="user",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
