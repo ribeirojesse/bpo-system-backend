@@ -15,6 +15,7 @@ from app.models.user import User
 
 from app.schemas.expense_subcategory import (
     ExpenseSubcategoryCreateSchema,
+    ExpenseSubcategoryUpdateSchema,
     ExpenseSubcategoryResponseSchema
 )
 
@@ -50,6 +51,8 @@ def create_subcategory(
     ]
 )
 def get_subcategories(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(
         get_current_user
@@ -59,6 +62,58 @@ def get_subcategories(
     return (
         ExpenseSubcategoryService.get_subcategories(
             db,
-            current_user
+            current_user,
+            skip,
+            limit
         )
+    )
+
+
+@router.get(
+    "/{subcategory_id}",
+    response_model=ExpenseSubcategoryResponseSchema
+)
+def get_subcategory(
+    subcategory_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    return ExpenseSubcategoryService.get_subcategory(
+        db,
+        current_user,
+        subcategory_id
+    )
+
+
+@router.put(
+    "/{subcategory_id}",
+    response_model=ExpenseSubcategoryResponseSchema
+)
+def update_subcategory(
+    subcategory_id: str,
+    data: ExpenseSubcategoryUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    return ExpenseSubcategoryService.update_subcategory(
+        db,
+        current_user,
+        subcategory_id,
+        data
+    )
+
+
+@router.delete("/{subcategory_id}")
+def delete_subcategory(
+    subcategory_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    return ExpenseSubcategoryService.delete_subcategory(
+        db,
+        current_user,
+        subcategory_id
     )

@@ -21,13 +21,22 @@ class AccountsPayableRepository:
         return payable
 
     @staticmethod
-    def get_all(db: Session, tenant_id):
+    def get_all(
+        db: Session,
+        tenant_id,
+        skip: int = 0,
+        limit: int = 100
+    ):
 
-        return db.query(
-            AccountsPayable
-        ).filter(
-            AccountsPayable.tenant_id == tenant_id
-        ).all()
+        return (
+            db.query(AccountsPayable)
+            .filter(
+                AccountsPayable.tenant_id == tenant_id
+            )
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
     @staticmethod
     def get_by_id(

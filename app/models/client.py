@@ -2,7 +2,8 @@ import uuid
 
 from sqlalchemy import (
     String,
-    ForeignKey
+    ForeignKey,
+    UniqueConstraint
 )
 
 from sqlalchemy.dialects.postgresql import UUID
@@ -19,6 +20,14 @@ from app.core.database import Base
 class Client(Base):
 
     __tablename__ = "clients"
+
+    __table_args__ = (
+        UniqueConstraint(
+            "tenant_id",
+            "cnpj",
+            name="uq_clients_tenant_cnpj"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

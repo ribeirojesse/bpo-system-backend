@@ -8,4 +8,11 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+RUN chmod +x docker-entrypoint.sh
+
+# ENVIRONMENT=production (definido via docker-compose/.env) desativa
+# o --reload; qualquer outro valor (ou ausência) mantém o
+# comportamento de desenvolvimento de antes.
+ENV ENVIRONMENT=development
+
+CMD ["./docker-entrypoint.sh"]

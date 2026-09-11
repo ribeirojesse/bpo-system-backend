@@ -11,7 +11,7 @@ from app.core.security import hash_password, verify_password, create_access_toke
 from app.models.tenant import Tenant
 from app.models.user import User
 
-from app.schemas.auth import RegisterSchema, LoginSchema
+from app.schemas.auth import RegisterSchema, LoginSchema, RefreshTokenSchema
 
 from app.dependencies.auth import get_current_user
 
@@ -82,6 +82,10 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
 
     refresh_token = RefreshTokenService.create(db, user)
 
+    # Manutenção oportunista: aproveita o login para descartar
+    # refresh tokens já expirados (não há agendador/cron no projeto).
+    RefreshTokenService.cleanup(db)
+
     return {
         "access_token": access_token,
         "refresh_token": refresh_token,
@@ -95,9 +99,9 @@ def login(data: LoginSchema, db: Session = Depends(get_db)):
 
 
 @router.post("/refresh")
-def refresh(refresh_token: str, db: Session = Depends(get_db)):
+def refresh(data: RefreshTokenSchema, db: Session = Depends(get_db)):
 
-    token = RefreshTokenService.validate(db, refresh_token)
+    token = RefreshTokenService.validate(db, data.refresh_token)
 
     if not token:
 
@@ -126,9 +130,9 @@ def refresh(refresh_token: str, db: Session = Depends(get_db)):
 
 
 @router.post("/logout")
-def logout(refresh_token: str, db: Session = Depends(get_db)):
+def logout(data: RefreshTokenSchema, db: Session = Depends(get_db)):
 
-    RefreshTokenService.revoke(db, refresh_token)
+    RefreshTokenService.revoke(db, data.refresh_token)
 
     return {"message": "Logout realizado"}
 

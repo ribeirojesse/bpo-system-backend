@@ -54,6 +54,12 @@ class AutoReconciliationService:
                 ==
                 transaction.tenant_id,
 
+                # mesmo cliente da transação: evita baixar o título
+                # de uma empresa-cliente diferente dentro do tenant
+                AccountsReceivable.client_id
+                ==
+                transaction.client_id,
+
                 AccountsReceivable.status
                 ==
                 "PENDENTE",
@@ -67,6 +73,9 @@ class AutoReconciliationService:
 
                 AccountsReceivable.vencimento
                 <= fim
+            ).order_by(
+                AccountsReceivable.vencimento.asc(),
+                AccountsReceivable.id.asc()
             ).first()
 
             if receivable:
@@ -81,6 +90,9 @@ class AutoReconciliationService:
 
                 reconciliation = (
                     BankReconciliation(
+                        tenant_id=
+                        transaction.tenant_id,
+
                         bank_transaction_id=
                         transaction.id,
 
@@ -135,6 +147,12 @@ class AutoReconciliationService:
                 ==
                 transaction.tenant_id,
 
+                # mesmo cliente da transação: evita baixar o título
+                # de uma empresa-cliente diferente dentro do tenant
+                AccountsPayable.client_id
+                ==
+                transaction.client_id,
+
                 AccountsPayable.status
                 ==
                 "PENDENTE",
@@ -148,6 +166,9 @@ class AutoReconciliationService:
 
                 AccountsPayable.vencimento
                 <= fim
+            ).order_by(
+                AccountsPayable.vencimento.asc(),
+                AccountsPayable.id.asc()
             ).first()
 
             if payable:
@@ -162,6 +183,9 @@ class AutoReconciliationService:
 
                 reconciliation = (
                     BankReconciliation(
+                        tenant_id=
+                        transaction.tenant_id,
+
                         bank_transaction_id=
                         transaction.id,
 

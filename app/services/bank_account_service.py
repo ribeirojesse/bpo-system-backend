@@ -42,12 +42,16 @@ class BankAccountService:
     @staticmethod
     def get_accounts(
         db,
-        current_user
+        current_user,
+        skip: int = 0,
+        limit: int = 100
     ):
 
         return BankAccountRepository.get_all(
             db,
-            current_user.tenant_id
+            current_user.tenant_id,
+            skip,
+            limit
         )
 
     @staticmethod

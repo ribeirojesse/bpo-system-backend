@@ -26,8 +26,49 @@ class BankReconciliationRepository:
         return reconciliation
 
     @staticmethod
-    def get_all(db: Session):
+    def get_all(
+        db: Session,
+        tenant_id,
+        skip: int = 0,
+        limit: int = 100
+    ):
 
-        return db.query(
-            BankReconciliation
-        ).all()
+        return (
+            db.query(BankReconciliation)
+            .filter(
+                BankReconciliation.tenant_id
+                == tenant_id
+            )
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
+
+    @staticmethod
+    def get_by_id(
+        db: Session,
+        tenant_id,
+        reconciliation_id
+    ):
+
+        return (
+            db.query(BankReconciliation)
+            .filter(
+                BankReconciliation.id
+                == reconciliation_id,
+
+                BankReconciliation.tenant_id
+                == tenant_id
+            )
+            .first()
+        )
+
+    @staticmethod
+    def delete(
+        db: Session,
+        reconciliation
+    ):
+
+        db.delete(reconciliation)
+
+        db.commit()

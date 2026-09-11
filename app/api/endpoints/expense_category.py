@@ -15,6 +15,7 @@ from app.models.user import User
 
 from app.schemas.expense_category import (
     ExpenseCategoryCreateSchema,
+    ExpenseCategoryUpdateSchema,
     ExpenseCategoryResponseSchema
 )
 
@@ -48,11 +49,65 @@ def create_category(
     response_model=list[ExpenseCategoryResponseSchema]
 )
 def get_categories(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
 
     return ExpenseCategoryService.get_categories(
         db,
-        current_user
+        current_user,
+        skip,
+        limit
+    )
+
+
+@router.get(
+    "/{category_id}",
+    response_model=ExpenseCategoryResponseSchema
+)
+def get_category(
+    category_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    return ExpenseCategoryService.get_category(
+        db,
+        current_user,
+        category_id
+    )
+
+
+@router.put(
+    "/{category_id}",
+    response_model=ExpenseCategoryResponseSchema
+)
+def update_category(
+    category_id: str,
+    data: ExpenseCategoryUpdateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    return ExpenseCategoryService.update_category(
+        db,
+        current_user,
+        category_id,
+        data
+    )
+
+
+@router.delete("/{category_id}")
+def delete_category(
+    category_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    return ExpenseCategoryService.delete_category(
+        db,
+        current_user,
+        category_id
     )

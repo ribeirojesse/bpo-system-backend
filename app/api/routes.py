@@ -84,14 +84,15 @@ api_router.include_router(
     tags=["OFX Import"]
 )
 
-api_router.include_router(
-    payroll.router,
-    prefix="/payroll",
-    tags=["Payroll"]
-)
+# payroll_batch é aninhado dentro do router de payroll para que só
+# exista um único include_router com o prefixo "/payroll" (evita
+# duplicar a entrada "Payroll" no Swagger/OpenAPI). As URLs finais
+# continuam as mesmas: /payroll/process, /payroll/batches,
+# /payroll/batch/{id}, /payroll/transaction/{id}.
+payroll.router.include_router(payroll_batch.router)
 
 api_router.include_router(
-    payroll_batch.router,
+    payroll.router,
     prefix="/payroll",
     tags=["Payroll"]
 )

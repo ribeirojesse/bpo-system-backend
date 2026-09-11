@@ -1,4 +1,8 @@
-import hashlib
+import io
+import logging
+import re
+
+from fastapi import HTTPException
 
 from ofxparse import OfxParser
 
@@ -6,78 +10,132 @@ from app.models.bank_transaction import (
     BankTransaction
 )
 
-from app.models.bank_account import (
-    BankAccount
+from app.repositories.bank_account_repository import (
+    BankAccountRepository
 )
 
 from app.services.auto_reconciliation_service import (
     AutoReconciliationService
 )
 
+from app.services.bank_transaction_service import (
+    BankTransactionService
+)
+
+
+logger = logging.getLogger(__name__)
+
+# Algumas linhas de OFX vêm com <FITID></FITID> vazio — normalmente
+# marcadores de saldo ("Saldo Anterior", "Saldo do dia") que alguns bancos
+# (ex.: Banco do Brasil) incluem no extrato, e não transações de verdade.
+# Regex em bytes: a sanitização acontece ANTES de qualquer decodificação,
+# operando direto sobre o arquivo cru (ver o comentário em carregar_ofx
+# sobre por que não decodificamos nós mesmos).
+FITID_VAZIO_RE = re.compile(rb"<FITID>\s*</FITID>", re.IGNORECASE)
+
 
 class OFXImportService:
 
     @staticmethod
-    def detectar_encoding(caminho):
+    def sanitizar_bytes(dados):
 
-        with open(caminho, "rb") as f:
+        # A lib ofxparse acessa node.fitid.contents[0] ao ler cada
+        # transação. Quando a tag <FITID> vem vazia, contents é uma lista
+        # vazia e isso derruba o parser com IndexError — que caía no
+        # "except Exception" abaixo e virava sempre "Arquivo OFX inválido
+        # ou corrompido", mesmo em arquivos perfeitamente válidos.
+        # Geramos um FITID sintético só para as tags vazias, sem alterar
+        # mais nada do conteúdo original (mexemos direto nos bytes, sem
+        # decodificar nada, então nenhum acento é tocado).
 
-            header = (
-                f.read(500)
-                .decode(
-                    "latin-1",
-                    errors="ignore"
-                )
-                .upper()
-            )
+        contador = {"n": 0}
 
-            if "CHARSET:1252" in header:
-                return "cp1252"
+        def substituir(match):
 
-            if "ISO-8859-1" in header:
-                return "latin-1"
+            contador["n"] += 1
 
-        return "latin-1"
+            return (
+                f"<FITID>AUTOFITID-{contador['n']}</FITID>"
+            ).encode("ascii")
+
+        return FITID_VAZIO_RE.sub(substituir, dados)
 
     @staticmethod
     def carregar_ofx(caminho):
 
-        encoding = (
-            OFXImportService.detectar_encoding(
+        try:
+
+            # A lib ofxparse já sabe ler o cabeçalho OFX (ENCODING/
+            # CHARSET) e escolher a decodificação correta sozinha — é
+            # assim que ela é documentada pra ser usada (arquivo aberto
+            # em modo binário, "rb"). A versão anterior deste serviço
+            # decodificava o arquivo em texto antes de entregar pra lib
+            # (tentando adivinhar o encoding aqui), e isso conflitava com
+            # a própria detecção de encoding da lib: ela lia o cabeçalho
+            # de novo e tentava redecodificar um conteúdo que já era
+            # texto, quebrando em qualquer caractere acentuado (ou, com
+            # certas combinações de cabeçalho, um LookupError de encoding
+            # inexistente). Passando bytes crus pra lib, ela decodifica
+            # certo na primeira e única vez.
+            with open(caminho, "rb") as f:
+                dados = f.read()
+
+            dados = OFXImportService.sanitizar_bytes(
+                dados
+            )
+
+            return OfxParser.parse(
+                io.BytesIO(dados)
+            )
+
+        except HTTPException:
+            raise
+
+        except Exception:
+
+            # Antes o erro real era descartado — agora fica registrado
+            # no log do servidor pra facilitar diagnosticar o próximo
+            # arquivo problemático, mesmo que o usuário só veja a
+            # mensagem genérica.
+            logger.exception(
+                "Falha ao interpretar arquivo OFX (%s)",
                 caminho
             )
-        )
 
-        with open(
-            caminho,
-            encoding=encoding,
-            errors="ignore"
-        ) as f:
-
-            return OfxParser.parse(f)
-
-    @staticmethod
-    def gerar_hash(
-        data,
-        valor,
-        descricao,
-        conta
-    ):
-
-        conteudo = (
-            f"{data}_{valor}_{descricao}_{conta}"
-        )
-
-        return hashlib.md5(
-            conteudo.encode()
-        ).hexdigest()
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Arquivo OFX inválido ou corrompido"
+                )
+            )
 
     @staticmethod
     def importar(
         db,
         current_user,
-        caminho_arquivo
+        caminho_arquivo,
+        bank_account_id
     ):
+
+        # A conta bancária é a que o usuário escolheu explicitamente na
+        # tela de importação — não tentamos mais "adivinhar" casando o
+        # número da conta dentro do arquivo OFX com o cadastro, porque
+        # bancos costumam formatar esse número de forma diferente do que
+        # foi digitado no cadastro (zeros à esquerda, máscara, dígito
+        # verificador), e uma divergência de formatação fazia a conta
+        # inteira ser pulada em silêncio, sem importar nenhuma transação e
+        # sem avisar o usuário do motivo.
+        bank_account = BankAccountRepository.get_by_id(
+            db,
+            current_user.tenant_id,
+            bank_account_id
+        )
+
+        if not bank_account:
+            raise HTTPException(
+                status_code=404,
+                detail="Conta bancária não encontrada"
+            )
 
         ofx = (
             OFXImportService.carregar_ofx(
@@ -91,18 +149,15 @@ class OFXImportService:
 
             account_id = conta.account_id
 
-            bank_account = db.query(
-                BankAccount
-            ).filter(
-                BankAccount.conta == account_id,
-                BankAccount.tenant_id ==
-                current_user.tenant_id
-            ).first()
-
-            if not bank_account:
-                continue
-
             for t in conta.statement.transactions:
+
+                valor = float(t.amount)
+
+                if valor == 0:
+                    # Linhas de saldo ("Saldo Anterior", "Saldo do dia")
+                    # não são movimentações reais — não faz sentido
+                    # gravar como transação bancária.
+                    continue
 
                 descricao = (
                     t.memo
@@ -112,10 +167,9 @@ class OFXImportService:
                     "Sem descrição"
                 )
 
-                valor = float(t.amount)
-
                 hash_transacao = (
-                    OFXImportService.gerar_hash(
+                    BankTransactionService.gerar_hash(
+                        current_user.tenant_id,
                         t.date,
                         valor,
                         descricao,
@@ -128,7 +182,11 @@ class OFXImportService:
                 ).filter(
                     BankTransaction.hash_transacao
                     ==
-                    hash_transacao
+                    hash_transacao,
+
+                    BankTransaction.tenant_id
+                    ==
+                    current_user.tenant_id
                 ).first()
 
                 if existente:

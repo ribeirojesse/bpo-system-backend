@@ -25,6 +25,12 @@ class AccountsReceivableCreateSchema(BaseModel):
 
     vencimento: date
 
+    # Data em que o recebimento efetivamente ocorreu. Toda conta a receber
+    # já nasce como RECEBIDA (lançamento manual = recebimento já realizado)
+    # — se não informada, o serviço usa a própria data de vencimento/
+    # lançamento.
+    data_recebimento: Optional[date] = None
+
     competencia: Optional[str] = None
 
     observacao: Optional[str] = None

@@ -1,3 +1,5 @@
+from typing import Optional
+
 from uuid import UUID
 
 from pydantic import BaseModel
@@ -10,6 +12,15 @@ class ExpenseCategoryCreateSchema(
     client_id: UUID
 
     nome: str
+
+
+class ExpenseCategoryUpdateSchema(
+    BaseModel
+):
+
+    nome: Optional[str] = None
+
+    ativo: Optional[bool] = None
 
 
 class ExpenseCategoryResponseSchema(

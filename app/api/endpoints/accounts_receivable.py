@@ -49,13 +49,17 @@ def create_receivable(
     response_model=list[AccountsReceivableResponseSchema]
 )
 def get_receivables(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
 
     return AccountsReceivableService.get_receivables(
         db,
-        current_user
+        current_user,
+        skip,
+        limit
     )
 
 

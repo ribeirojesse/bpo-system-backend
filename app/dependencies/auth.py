@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
+from app.core.security import is_access_token
 
 from app.models.user import User
 
@@ -42,6 +43,11 @@ def get_current_user(
         user_id = payload.get("sub")
 
         if user_id is None:
+            raise credentials_exception
+
+        # Garante que apenas access tokens autenticam rotas protegidas
+        # (um refresh token não pode ser usado como Bearer token).
+        if not is_access_token(payload):
             raise credentials_exception
 
     except JWTError:

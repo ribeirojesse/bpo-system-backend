@@ -49,13 +49,17 @@ def create_transaction(
     response_model=list[BankTransactionResponseSchema]
 )
 def get_transactions(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
 
     return BankTransactionService.get_transactions(
         db,
-        current_user
+        current_user,
+        skip,
+        limit
     )
 
 
@@ -103,6 +107,40 @@ def delete_transaction(
 ):
 
     return BankTransactionService.delete_transaction(
+        db,
+        current_user,
+        transaction_id
+    )
+
+
+@router.post(
+    "/{transaction_id}/ignorar",
+    response_model=BankTransactionResponseSchema
+)
+def ignore_transaction(
+    transaction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    return BankTransactionService.ignore_transaction(
+        db,
+        current_user,
+        transaction_id
+    )
+
+
+@router.post(
+    "/{transaction_id}/reabrir",
+    response_model=BankTransactionResponseSchema
+)
+def restore_transaction(
+    transaction_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+
+    return BankTransactionService.restore_transaction(
         db,
         current_user,
         transaction_id

@@ -24,12 +24,20 @@ class ClientRepository:
     @staticmethod
     def get_all(
         db: Session,
-        tenant_id
+        tenant_id,
+        skip: int = 0,
+        limit: int = 100
     ):
 
-        return db.query(Client).filter(
-            Client.tenant_id == tenant_id
-        ).all()
+        return (
+            db.query(Client)
+            .filter(
+                Client.tenant_id == tenant_id
+            )
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
     @staticmethod
     def get_by_id(

@@ -50,6 +50,9 @@ class PayrollPDFService:
             except:
                 continue
 
+            if valor <= 0:
+                continue
+
             # remove valor da linha para sobrar só texto
             linha_sem_valor = linha.replace(valor_str, "").strip()
 
@@ -66,64 +69,5 @@ class PayrollPDFService:
                 "funcionario": nome,
                 "valor": valor
             })
-
-        return funcionarios
-
-        funcionarios = []
-
-        linhas = texto.split("\n")
-
-        for linha in linhas:
-
-            linha = linha.strip()
-
-            if not linha:
-                continue
-
-            padrao = (
-                r"([A-ZÀ-Ú\s]+)"
-                r"\s+"
-                r"([\d\.,]+)$"
-            )
-
-            match = re.search(
-                padrao,
-                linha
-            )
-
-            if not match:
-                continue
-
-            nome = (
-                match.group(1)
-                .strip()
-            )
-
-            valor = (
-                match.group(2)
-                .replace(".", "")
-                .replace(",", ".")
-            )
-
-            if len(nome) < 3:
-                continue
-
-            try:
-
-                valor = float(valor)
-
-                if valor <= 0:
-                    continue
-
-                funcionarios.append({
-                    "funcionario":
-                    nome,
-
-                    "valor":
-                    valor
-                })
-
-            except:
-                pass
 
         return funcionarios

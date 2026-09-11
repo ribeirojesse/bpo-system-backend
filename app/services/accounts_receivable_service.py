@@ -84,6 +84,17 @@ class AccountsReceivableService:
 
         payload["tenant_id"] = current_user.tenant_id
 
+        # Regra de negócio: não existe mais "conta pendente aguardando
+        # confirmação" nesse sistema. Um lançamento manual representa um
+        # recebimento que já aconteceu, então ele já nasce RECEBIDO — sem
+        # precisar de uma segunda ação pra "confirmar" o que a pessoa
+        # acabou de informar. Se não vier uma data de recebimento
+        # explícita, usamos a própria data do lançamento.
+        payload["status"] = "RECEBIDO"
+
+        if not payload.get("data_recebimento"):
+            payload["data_recebimento"] = payload["vencimento"]
+
         return AccountsReceivableRepository.create(
             db,
             payload
@@ -92,12 +103,16 @@ class AccountsReceivableService:
     @staticmethod
     def get_receivables(
         db,
-        current_user
+        current_user,
+        skip: int = 0,
+        limit: int = 100
     ):
 
         return AccountsReceivableRepository.get_all(
             db,
-            current_user.tenant_id
+            current_user.tenant_id,
+            skip,
+            limit
         )
 
     @staticmethod

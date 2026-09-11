@@ -21,13 +21,22 @@ class BankAccountRepository:
         return account
 
     @staticmethod
-    def get_all(db: Session, tenant_id):
+    def get_all(
+        db: Session,
+        tenant_id,
+        skip: int = 0,
+        limit: int = 100
+    ):
 
-        return db.query(
-            BankAccount
-        ).filter(
-            BankAccount.tenant_id == tenant_id
-        ).all()
+        return (
+            db.query(BankAccount)
+            .filter(
+                BankAccount.tenant_id == tenant_id
+            )
+            .offset(skip)
+            .limit(limit)
+            .all()
+        )
 
     @staticmethod
     def get_by_id(

@@ -49,13 +49,17 @@ def create_contact(
     response_model=list[FinancialContactResponseSchema]
 )
 def get_contacts(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
 
     return FinancialContactService.get_contacts(
         db,
-        current_user
+        current_user,
+        skip,
+        limit
     )
 
 

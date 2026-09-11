@@ -9,7 +9,8 @@ from sqlalchemy import (
     ForeignKey,
     Date,
     Numeric,
-    Boolean
+    Boolean,
+    UniqueConstraint
 )
 
 from sqlalchemy.dialects.postgresql import UUID
@@ -26,6 +27,17 @@ from app.core.database import Base
 class BankTransaction(Base):
 
     __tablename__ = "bank_transactions"
+
+    __table_args__ = (
+        # O hash de deduplicação só precisa ser único DENTRO do
+        # mesmo tenant — dois tenants podem coincidir em
+        # data+valor+descrição+conta sem que isso seja duplicidade.
+        UniqueConstraint(
+            "tenant_id",
+            "hash_transacao",
+            name="uq_bank_transactions_tenant_hash"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
@@ -96,6 +108,15 @@ class BankTransaction(Base):
         default=False
     )
 
+    # Transação arquivada/ignorada pelo usuário na tela de Conciliação —
+    # não representa uma despesa/receita real (ex.: transferência entre
+    # contas do próprio cliente), então não gera conta a pagar/receber e
+    # some da lista de pendências sem precisar virar um lançamento.
+    ignorada: Mapped[bool] = mapped_column(
+        Boolean,
+        default=False
+    )
+
     tenant = relationship("Tenant")
 
     client = relationship("Client")
@@ -105,7 +126,6 @@ class BankTransaction(Base):
     )
 
     hash_transacao: Mapped[str] = mapped_column(
-    String,
-    nullable=False,
-    unique=True
-)
+        String,
+        nullable=False
+    )

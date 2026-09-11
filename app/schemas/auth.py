@@ -25,3 +25,8 @@ class TokenSchema(BaseModel):
 
     token_type: str = "bearer"
 
+
+class RefreshTokenSchema(BaseModel):
+
+    refresh_token: str
+

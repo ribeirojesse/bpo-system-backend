@@ -13,6 +13,7 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+from app.core.files import gerar_nome_seguro
 
 from app.dependencies.auth import (
     get_current_user
@@ -59,7 +60,9 @@ def process_payroll(
     if not transaction:
         raise HTTPException(status_code=404, detail="Transação não encontrada")
 
-    caminho = f"{UPLOAD_DIR}/{file.filename}"
+    nome_seguro = gerar_nome_seguro(file.filename)
+
+    caminho = f"{UPLOAD_DIR}/{nome_seguro}"
 
     with open(caminho, "wb") as buffer:
         shutil.copyfileobj(file.file, buffer)

@@ -42,10 +42,81 @@ class ExpenseCategoryService:
     @staticmethod
     def get_categories(
         db,
-        current_user
+        current_user,
+        skip: int = 0,
+        limit: int = 100
     ):
 
         return ExpenseCategoryRepository.get_all(
             db,
-            current_user.tenant_id
+            current_user.tenant_id,
+            skip,
+            limit
         )
+
+    @staticmethod
+    def get_category(
+        db,
+        current_user,
+        category_id
+    ):
+
+        category = ExpenseCategoryRepository.get_by_id(
+            db,
+            current_user.tenant_id,
+            category_id
+        )
+
+        if not category:
+            raise HTTPException(
+                status_code=404,
+                detail="Categoria não encontrada"
+            )
+
+        return category
+
+    @staticmethod
+    def update_category(
+        db,
+        current_user,
+        category_id,
+        data
+    ):
+
+        category = ExpenseCategoryService.get_category(
+            db,
+            current_user,
+            category_id
+        )
+
+        payload = data.model_dump(
+            exclude_unset=True
+        )
+
+        return ExpenseCategoryRepository.update(
+            db,
+            category,
+            payload
+        )
+
+    @staticmethod
+    def delete_category(
+        db,
+        current_user,
+        category_id
+    ):
+
+        category = ExpenseCategoryService.get_category(
+            db,
+            current_user,
+            category_id
+        )
+
+        ExpenseCategoryRepository.delete(
+            db,
+            category
+        )
+
+        return {
+            "message": "Categoria removida"
+        }

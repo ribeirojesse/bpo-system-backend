@@ -49,13 +49,17 @@ def create_client(
     response_model=list[ClientResponseSchema]
 )
 def get_clients(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
 
     return ClientService.get_clients(
         db,
-        current_user
+        current_user,
+        skip,
+        limit
     )
 
 

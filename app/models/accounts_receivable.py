@@ -8,7 +8,8 @@ from sqlalchemy import (
     String,
     ForeignKey,
     Date,
-    Numeric
+    Numeric,
+    Index
 )
 
 from sqlalchemy.dialects.postgresql import UUID
@@ -25,6 +26,14 @@ from app.core.database import Base
 class AccountsReceivable(Base):
 
     __tablename__ = "accounts_receivable"
+
+    __table_args__ = (
+        Index(
+            "ix_accounts_receivable_tenant_status",
+            "tenant_id",
+            "status"
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),

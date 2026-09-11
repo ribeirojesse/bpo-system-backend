@@ -84,6 +84,17 @@ class AccountsPayableService:
 
         payload["tenant_id"] = current_user.tenant_id
 
+        # Regra de negócio: não existe mais "conta pendente aguardando
+        # confirmação" nesse sistema. Um lançamento manual representa um
+        # pagamento que já aconteceu, então ele já nasce PAGO — sem
+        # precisar de uma segunda ação pra "confirmar" o que a pessoa
+        # acabou de informar. Se não vier uma data de pagamento explícita,
+        # usamos a própria data do lançamento.
+        payload["status"] = "PAGO"
+
+        if not payload.get("data_pagamento"):
+            payload["data_pagamento"] = payload["vencimento"]
+
         return AccountsPayableRepository.create(
             db,
             payload
@@ -92,12 +103,16 @@ class AccountsPayableService:
     @staticmethod
     def get_payables(
         db,
-        current_user
+        current_user,
+        skip: int = 0,
+        limit: int = 100
     ):
 
         return AccountsPayableRepository.get_all(
             db,
-            current_user.tenant_id
+            current_user.tenant_id,
+            skip,
+            limit
         )
 
     @staticmethod

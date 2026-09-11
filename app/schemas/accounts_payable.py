@@ -25,6 +25,11 @@ class AccountsPayableCreateSchema(BaseModel):
 
     vencimento: date
 
+    # Data em que o pagamento efetivamente ocorreu. Toda conta a pagar já
+    # nasce como PAGA (lançamento manual = pagamento já realizado) — se não
+    # informada, o serviço usa a própria data de vencimento/lançamento.
+    data_pagamento: Optional[date] = None
+
     competencia: Optional[str] = None
 
     observacao: Optional[str] = None

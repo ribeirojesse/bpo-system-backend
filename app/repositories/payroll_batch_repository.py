@@ -8,7 +8,9 @@ class PayrollBatchRepository:
     @staticmethod
     def get_all(
         db,
-        tenant_id
+        tenant_id,
+        skip: int = 0,
+        limit: int = 100
     ):
 
         return (
@@ -17,6 +19,8 @@ class PayrollBatchRepository:
                 PayrollBatch.tenant_id
                 == tenant_id
             )
+            .offset(skip)
+            .limit(limit)
             .all()
         )
 

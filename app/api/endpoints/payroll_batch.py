@@ -34,6 +34,8 @@ router = APIRouter()
     ]
 )
 def get_batches(
+    skip: int = 0,
+    limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(
         get_current_user
@@ -43,7 +45,9 @@ def get_batches(
     return (
         PayrollBatchService.get_batches(
             db,
-            current_user
+            current_user,
+            skip,
+            limit
         )
     )
 

@@ -1,10 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
 # Logs
 logs
 *.logs
 
 uploads/
 
-alembic/
+# NÃO ignorar alembic/versions/ — são as migrations do banco e
+# precisam ser versionadas para o schema ser reproduzível em outro
+# ambiente (deploy, CI, clone novo do repositório).
+alembic/versions/__pycache__/
+alembic/__pycache__/
 
 # Environment variables
 .env

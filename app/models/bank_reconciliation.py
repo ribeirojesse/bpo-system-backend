@@ -32,6 +32,12 @@ class BankReconciliation(Base):
         default=uuid.uuid4
     )
 
+    tenant_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("tenants.id"),
+        nullable=False
+    )
+
     bank_transaction_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("bank_transactions.id"),
@@ -63,6 +69,10 @@ class BankReconciliation(Base):
     observacao: Mapped[str] = mapped_column(
         String,
         nullable=True
+    )
+
+    tenant = relationship(
+        "Tenant"
     )
 
     bank_transaction = relationship(

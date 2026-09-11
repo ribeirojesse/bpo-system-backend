@@ -30,6 +30,10 @@ class PayrollBatchResponseSchema(
 
     id: uuid.UUID
 
+    client_id: uuid.UUID
+
+    bank_transaction_id: uuid.UUID
+
     competencia: str
 
     valor_total: Decimal

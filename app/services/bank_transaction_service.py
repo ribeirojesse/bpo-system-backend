@@ -19,17 +19,20 @@ class BankTransactionService:
 
     @staticmethod
     def gerar_hash(
+        tenant_id,
         data,
         valor,
         descricao,
         conta
     ):
 
+        # Inclui o tenant_id no conteúdo do hash para que a
+        # deduplicação nunca cruze dados entre tenants diferentes.
         conteudo = (
-            f"{data}_{valor}_{descricao}_{conta}"
+            f"{tenant_id}_{data}_{valor}_{descricao}_{conta}"
         )
 
-        return hashlib.md5(
+        return hashlib.sha256(
             conteudo.encode()
         ).hexdigest()
 
@@ -74,6 +77,7 @@ class BankTransactionService:
 
         payload["hash_transacao"] = (
             BankTransactionService.gerar_hash(
+                current_user.tenant_id,
                 data.data_transacao,
                 data.valor,
                 data.descricao,
@@ -91,12 +95,16 @@ class BankTransactionService:
     @staticmethod
     def get_transactions(
         db,
-        current_user
+        current_user,
+        skip: int = 0,
+        limit: int = 100
     ):
 
         return BankTransactionRepository.get_all(
             db,
-            current_user.tenant_id
+            current_user.tenant_id,
+            skip,
+            limit
         )
 
     @staticmethod
@@ -173,3 +181,71 @@ class BankTransactionService:
             "message":
             "Transação removida"
         }
+
+    @staticmethod
+    def ignore_transaction(
+        db,
+        current_user,
+        transaction_id
+    ):
+        """Arquiva uma transação sem lançamento correspondente (ex.:
+        transferência entre contas do próprio cliente) — ela some da
+        lista de pendências da Conciliação sem virar uma conta a
+        pagar/receber."""
+
+        transaction = (
+            BankTransactionService.get_transaction(
+                db,
+                current_user,
+                transaction_id
+            )
+        )
+
+        if transaction.conciliado:
+            raise HTTPException(
+                status_code=400,
+                detail="Essa transação já foi conciliada"
+            )
+
+        if transaction.processado:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Essa transação já foi "
+                    "processada via folha "
+                    "de pagamento"
+                )
+            )
+
+        transaction.ignorada = True
+
+        db.commit()
+
+        db.refresh(transaction)
+
+        return transaction
+
+    @staticmethod
+    def restore_transaction(
+        db,
+        current_user,
+        transaction_id
+    ):
+        """Desfaz o arquivamento — a transação volta a aparecer na lista
+        de pendências da Conciliação."""
+
+        transaction = (
+            BankTransactionService.get_transaction(
+                db,
+                current_user,
+                transaction_id
+            )
+        )
+
+        transaction.ignorada = False
+
+        db.commit()
+
+        db.refresh(transaction)
+
+        return transaction

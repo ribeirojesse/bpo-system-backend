@@ -26,12 +26,16 @@ class ClientService:
     @staticmethod
     def get_clients(
         db,
-        current_user
+        current_user,
+        skip: int = 0,
+        limit: int = 100
     ):
 
         return ClientRepository.get_all(
             db,
-            current_user.tenant_id
+            current_user.tenant_id,
+            skip,
+            limit
         )
 
     @staticmethod

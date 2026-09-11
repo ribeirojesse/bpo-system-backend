@@ -69,5 +69,7 @@ class BankTransactionResponseSchema(BaseModel):
 
     conciliado: bool
 
+    ignorada: bool
+
     class Config:
         from_attributes = True
