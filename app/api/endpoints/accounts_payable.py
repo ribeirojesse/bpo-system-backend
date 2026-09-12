@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 
 from app.dependencies.auth import (
-    get_current_user
+    require_role
 )
 
 from app.models.user import User
@@ -27,6 +27,11 @@ from app.services.accounts_payable_service import (
 router = APIRouter()
 
 
+# Dado tenant-wide (todos os clients da carteira, não só um). Restrito a
+# ADMIN — o portal do CLIENTE (só leitura, escopado a um client) tem suas
+# próprias rotas em /portal.
+
+
 @router.post(
     "/",
     response_model=AccountsPayableResponseSchema
@@ -34,7 +39,7 @@ router = APIRouter()
 def create_payable(
     data: AccountsPayableCreateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsPayableService.create_payable(
@@ -52,7 +57,7 @@ def get_payables(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsPayableService.get_payables(
@@ -70,7 +75,7 @@ def get_payables(
 def get_payable(
     payable_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsPayableService.get_payable(
@@ -88,7 +93,7 @@ def update_payable(
     payable_id: str,
     data: AccountsPayableUpdateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsPayableService.update_payable(
@@ -103,7 +108,7 @@ def update_payable(
 def delete_payable(
     payable_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsPayableService.delete_payable(

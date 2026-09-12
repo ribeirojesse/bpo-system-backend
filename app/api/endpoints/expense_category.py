@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 
 from app.dependencies.auth import (
-    get_current_user
+    require_role
 )
 
 from app.models.user import User
@@ -27,6 +27,11 @@ from app.services.expense_category_service import (
 router = APIRouter()
 
 
+# Dado tenant-wide (todos os clients da carteira, não só um). Restrito a
+# ADMIN — o portal do CLIENTE (só leitura, escopado a um client) tem sua
+# própria rota GET /portal/categorias.
+
+
 @router.post(
     "/",
     response_model=ExpenseCategoryResponseSchema
@@ -34,7 +39,7 @@ router = APIRouter()
 def create_category(
     data: ExpenseCategoryCreateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseCategoryService.create_category(
@@ -52,7 +57,7 @@ def get_categories(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseCategoryService.get_categories(
@@ -70,7 +75,7 @@ def get_categories(
 def get_category(
     category_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseCategoryService.get_category(
@@ -88,7 +93,7 @@ def update_category(
     category_id: str,
     data: ExpenseCategoryUpdateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseCategoryService.update_category(
@@ -103,7 +108,7 @@ def update_category(
 def delete_category(
     category_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseCategoryService.delete_category(

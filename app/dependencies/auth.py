@@ -61,3 +61,25 @@ def get_current_user(
         raise credentials_exception
 
     return user
+
+
+def require_role(*roles: str):
+    """
+    Dependency factory para restringir uma rota a um ou mais roles.
+
+    Uso: current_user: User = Depends(require_role("SUPER_ADMIN"))
+    """
+
+    def dependency(
+        current_user: User = Depends(get_current_user)
+    ):
+
+        if current_user.role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado para este perfil de usuário"
+            )
+
+        return current_user
+
+    return dependency

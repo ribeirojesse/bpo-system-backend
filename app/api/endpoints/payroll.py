@@ -16,7 +16,7 @@ from app.core.database import get_db
 from app.core.files import gerar_nome_seguro
 
 from app.dependencies.auth import (
-    get_current_user
+    require_role
 )
 
 from app.models.user import User
@@ -48,7 +48,7 @@ def process_payroll(
     category_id: str = Form(...),
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     transaction = BankTransactionRepository.get_by_id(
@@ -75,4 +75,3 @@ def process_payroll(
         competencia,
         category_id
     )
-

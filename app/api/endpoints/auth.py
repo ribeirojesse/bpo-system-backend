@@ -1,17 +1,14 @@
-from datetime import datetime, UTC
-
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 
-from app.core.security import hash_password, verify_password, create_access_token
+from app.core.security import verify_password, create_access_token
 
-from app.models.tenant import Tenant
 from app.models.user import User
 
-from app.schemas.auth import RegisterSchema, LoginSchema, RefreshTokenSchema
+from app.schemas.auth import LoginSchema, RefreshTokenSchema
 
 from app.dependencies.auth import get_current_user
 
@@ -21,37 +18,15 @@ router = APIRouter()
 
 
 # ============================================================
-# REGISTER
+# REGISTER (removido)
 # ============================================================
-
-
-@router.post("/register")
-def register(data: RegisterSchema, db: Session = Depends(get_db)):
-
-    user_exists = db.query(User).filter(User.email == data.email).first()
-
-    if user_exists:
-
-        raise HTTPException(status_code=400, detail="Email já cadastrado")
-
-    tenant = Tenant(nome=data.tenant_nome, email=data.email)
-
-    db.add(tenant)
-
-    db.flush()
-
-    user = User(
-        tenant_id=tenant.id,
-        nome=data.nome,
-        email=data.email,
-        senha_hash=hash_password(data.password),
-    )
-
-    db.add(user)
-
-    db.commit()
-
-    return {"message": "Usuário criado"}
+#
+# Existia aqui um POST /register público: qualquer um podia se
+# auto-provisionar um tenant + usuário sem autenticação nenhuma. Isso foi
+# removido — a criação de usuários agora exige um SUPER_ADMIN autenticado
+# e vive em POST /admin/users (ver app/api/endpoints/admin_user.py e
+# app/services/admin_user_service.py), que faz a mesma coisa por baixo
+# (cria Tenant + User) só que protegida.
 
 
 # ============================================================
@@ -165,4 +140,5 @@ def me(current_user: User = Depends(get_current_user)):
         "nome": current_user.nome,
         "email": current_user.email,
         "tenant_id": current_user.tenant_id,
+        "role": current_user.role,
     }

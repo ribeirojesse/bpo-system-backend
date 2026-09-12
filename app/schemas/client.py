@@ -41,3 +41,20 @@ class ClientResponseSchema(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# Acesso do CLIENTE ao portal (login travado a este client, ver
+# ck_users_role_scope). Todo client já tem um login criado automaticamente
+# pela migration b1c4a9d7e2f0 — este schema serve pra o ADMIN enxergar
+# qual é o e-mail atual e, se quiser, trocar e-mail/senha.
+
+class ClientPortalAccessResponseSchema(BaseModel):
+
+    has_access: bool
+    email: Optional[str] = None
+
+
+class ClientPortalAccessUpdateSchema(BaseModel):
+
+    email: Optional[EmailStr] = None
+    password: Optional[str] = None

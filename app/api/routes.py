@@ -1,9 +1,9 @@
 from fastapi import APIRouter
 from app.api.endpoints import (
-                                auth, 
-                                client, 
-                                financial_contact, 
-                                expense_category, 
+                                auth,
+                                client,
+                                financial_contact,
+                                expense_category,
                                 expense_subcategory,
                                 accounts_payable,
                                 accounts_receivable,
@@ -12,7 +12,9 @@ from app.api.endpoints import (
                                 bank_reconciliation,
                                 ofx_import,
                                 payroll,
-                                payroll_batch
+                                payroll_batch,
+                                admin_user,
+                                portal
                               )
 
 
@@ -22,6 +24,12 @@ api_router.include_router(
     auth.router,
     prefix="/auth",
     tags=["Auth"]
+)
+
+api_router.include_router(
+    admin_user.router,
+    prefix="/admin/users",
+    tags=["Admin - Users"]
 )
 
 api_router.include_router(
@@ -95,4 +103,12 @@ api_router.include_router(
     payroll.router,
     prefix="/payroll",
     tags=["Payroll"]
+)
+
+# Portal do CLIENTE — só-leitura, escopado a um único client
+# (ver app/api/endpoints/portal.py e app/services/portal_service.py).
+api_router.include_router(
+    portal.router,
+    prefix="/portal",
+    tags=["Portal do Cliente"]
 )

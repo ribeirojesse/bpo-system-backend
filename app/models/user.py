@@ -1,5 +1,7 @@
 import uuid
 
+from typing import Optional
+
 from sqlalchemy import (
     String,
     ForeignKey,
@@ -27,10 +29,20 @@ class User(Base):
         default=uuid.uuid4
     )
 
-    tenant_id: Mapped[uuid.UUID] = mapped_column(
+    # Nulo apenas para role = SUPER_ADMIN, que não pertence a nenhum
+    # tenant (ver ck_users_role_scope na migration fa3887bfd9e6).
+    tenant_id: Mapped[Optional[uuid.UUID]] = mapped_column(
         UUID(as_uuid=True),
         ForeignKey("tenants.id"),
-        nullable=False
+        nullable=True
+    )
+
+    # Preenchido apenas para role = CLIENTE: restringe o login a UM
+    # client específico, em vez de à carteira inteira do tenant.
+    client_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("clients.id"),
+        nullable=True
     )
 
     nome: Mapped[str] = mapped_column(
@@ -49,9 +61,18 @@ class User(Base):
         nullable=False
     )
 
+    # Valores válidos: SUPER_ADMIN, ADMIN, CLIENTE.
+    # - SUPER_ADMIN: sem tenant_id, sem client_id. Cria os usuários ADMIN
+    #   (ver app/api/endpoints/admin_user.py).
+    # - ADMIN: sempre com tenant_id, sem client_id. É dono de uma
+    #   carteira de clients (o "USER" que cria seus próprios clients).
+    # - CLIENTE: sempre com tenant_id E client_id. Login restrito a um
+    #   único client (portal do cliente, a ser construído).
+    # A combinação é garantida em banco pela constraint
+    # ck_users_role_scope (migration fa3887bfd9e6).
     role: Mapped[str] = mapped_column(
         String,
-        default="admin"
+        default="ADMIN"
     )
 
     ativo: Mapped[bool] = mapped_column(
@@ -61,6 +82,10 @@ class User(Base):
 
     tenant = relationship(
         "Tenant"
+    )
+
+    client = relationship(
+        "Client"
     )
 
     refresh_tokens = relationship(

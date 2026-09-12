@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 
 from app.dependencies.auth import (
-    get_current_user
+    require_role
 )
 
 from app.models.user import User
@@ -34,7 +34,7 @@ router = APIRouter()
 def create_subcategory(
     data: ExpenseSubcategoryCreateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseSubcategoryService.create_subcategory(
@@ -55,7 +55,7 @@ def get_subcategories(
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(
-        get_current_user
+        require_role("ADMIN")
     )
 ):
 
@@ -76,7 +76,7 @@ def get_subcategories(
 def get_subcategory(
     subcategory_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseSubcategoryService.get_subcategory(
@@ -94,7 +94,7 @@ def update_subcategory(
     subcategory_id: str,
     data: ExpenseSubcategoryUpdateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseSubcategoryService.update_subcategory(
@@ -109,7 +109,7 @@ def update_subcategory(
 def delete_subcategory(
     subcategory_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return ExpenseSubcategoryService.delete_subcategory(

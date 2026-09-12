@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 
 from app.dependencies.auth import (
-    get_current_user
+    require_role
 )
 
 from app.models.user import User
@@ -27,6 +27,11 @@ from app.services.accounts_receivable_service import (
 router = APIRouter()
 
 
+# Dado tenant-wide (todos os clients da carteira, não só um). Restrito a
+# ADMIN — o portal do CLIENTE (só leitura, escopado a um client) tem suas
+# próprias rotas em /portal.
+
+
 @router.post(
     "/",
     response_model=AccountsReceivableResponseSchema
@@ -34,7 +39,7 @@ router = APIRouter()
 def create_receivable(
     data: AccountsReceivableCreateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsReceivableService.create_receivable(
@@ -52,7 +57,7 @@ def get_receivables(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsReceivableService.get_receivables(
@@ -70,7 +75,7 @@ def get_receivables(
 def get_receivable(
     receivable_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsReceivableService.get_receivable(
@@ -88,7 +93,7 @@ def update_receivable(
     receivable_id: str,
     data: AccountsReceivableUpdateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsReceivableService.update_receivable(
@@ -103,7 +108,7 @@ def update_receivable(
 def delete_receivable(
     receivable_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return AccountsReceivableService.delete_receivable(

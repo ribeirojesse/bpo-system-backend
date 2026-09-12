@@ -1,17 +1,6 @@
 from pydantic import BaseModel, EmailStr
 
 
-class RegisterSchema(BaseModel):
-
-    tenant_nome: str
-
-    nome: str
-
-    email: EmailStr
-
-    password: str
-
-
 class LoginSchema(BaseModel):
 
     email: EmailStr
@@ -29,4 +18,3 @@ class TokenSchema(BaseModel):
 class RefreshTokenSchema(BaseModel):
 
     refresh_token: str
-

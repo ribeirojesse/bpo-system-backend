@@ -15,7 +15,7 @@ from app.core.database import get_db
 from app.core.files import gerar_nome_seguro
 
 from app.dependencies.auth import (
-    get_current_user
+    require_role
 )
 
 from app.models.user import User
@@ -48,7 +48,7 @@ def import_ofx(
     bank_account_id: str = Form(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(
-        get_current_user
+        require_role("ADMIN")
     )
 ):
 

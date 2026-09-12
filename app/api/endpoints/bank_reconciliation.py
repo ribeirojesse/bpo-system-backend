@@ -8,7 +8,7 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 
 from app.dependencies.auth import (
-    get_current_user
+    require_role
 )
 
 from app.models.user import User
@@ -28,6 +28,11 @@ from app.services.bank_reconciliation_service import (
 router = APIRouter()
 
 
+# Dado tenant-wide (todos os clients da carteira, não só um). Restrito a
+# ADMIN — o CLIENTE não opera conciliação, só vê o resultado dela nos
+# lançamentos do portal (/portal/lancamentos).
+
+
 @router.post(
     "/from-transaction/{transaction_id}",
     response_model=BankReconciliationResponseSchema
@@ -36,7 +41,7 @@ def create_reconciliation_from_transaction(
     transaction_id: str,
     data: BankReconciliationFromTransactionSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
     """Fluxo padrão da tela de Conciliação: cria o lançamento
     (conta a pagar/receber, já PAGO/RECEBIDO) e concilia a transação
@@ -60,7 +65,7 @@ def create_reconciliation_from_transaction(
 def create_reconciliation(
     data: BankReconciliationCreateSchema,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return (
@@ -82,7 +87,7 @@ def get_reconciliations(
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return (
@@ -103,7 +108,7 @@ def get_reconciliations(
 )
 def get_suggestions(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
     """Sugestão de lançamento existente pra cada transação bancária
     pendente — a base da tela de Conciliação no estilo Conta Azul.
@@ -125,7 +130,7 @@ def get_suggestions(
 def get_reconciliation(
     reconciliation_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return (
@@ -141,7 +146,7 @@ def get_reconciliation(
 def delete_reconciliation(
     reconciliation_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return (

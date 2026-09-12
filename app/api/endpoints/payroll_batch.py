@@ -10,7 +10,7 @@ from app.core.database import (
 )
 
 from app.dependencies.auth import (
-    get_current_user
+    require_role
 )
 
 from app.models.user import User
@@ -38,7 +38,7 @@ def get_batches(
     limit: int = 100,
     db: Session = Depends(get_db),
     current_user: User = Depends(
-        get_current_user
+        require_role("ADMIN")
     )
 ):
 
@@ -61,7 +61,7 @@ def get_batch(
     batch_id: str,
     db: Session = Depends(get_db),
     current_user: User = Depends(
-        get_current_user
+        require_role("ADMIN")
     )
 ):
 
@@ -77,7 +77,7 @@ def get_batch(
 def get_batch_by_transaction(
     transaction_id: str,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(require_role("ADMIN"))
 ):
 
     return PayrollBatchService.get_by_transaction(
