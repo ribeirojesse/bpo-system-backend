@@ -91,3 +91,14 @@ class ReconciliationSuggestionSchema(BaseModel):
     transaction_id: uuid.UUID
 
     match: Optional[ReconciliationMatchSchema] = None
+
+    # Preenchidos só quando NÃO há "match" (nenhum lançamento existente
+    # pra vincular): contato/categoria/subcategoria mais usados em
+    # lançamentos com descrição parecida com a da transação — usados só
+    # pra pré-preencher o formulário de "Criar lançamento", nunca pra
+    # vincular sozinho.
+    sugestao_financial_contact_id: Optional[uuid.UUID] = None
+
+    sugestao_category_id: Optional[uuid.UUID] = None
+
+    sugestao_subcategory_id: Optional[uuid.UUID] = None

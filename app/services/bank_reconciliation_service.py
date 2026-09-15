@@ -1,6 +1,12 @@
+import re
+
+from collections import Counter
+
 from datetime import timedelta
 
 from decimal import Decimal
+
+from difflib import SequenceMatcher
 
 from fastapi import HTTPException
 
@@ -53,6 +59,139 @@ class BankReconciliationService:
     # transação ainda entra como sugestão (confiança "PROXIMO" — o "Quase lá"
     # do Conta Azul); vencimento exatamente igual vira "EXATO" ("Encontramos").
     TOLERANCIA_DIAS_SUGESTAO = 5
+
+    # Quando não há lançamento com valor+data batendo bem, ainda vale
+    # sugerir um candidato pela DESCRIÇÃO parecida (ex.: mesmo fornecedor
+    # recorrente, mas com vencimento fora da janela de 5 dias) — vira a
+    # confiança "PARECIDO", abaixo de "PROXIMO". Limiar calibrado contra
+    # descrições reais de extrato: acima disso, na prática só nomes de
+    # fornecedor realmente iguais (ignorando números de documento/
+    # referência, que variam a cada lançamento) passam.
+    SIMILARIDADE_MINIMA = 0.55
+
+    # Pra sugerir contato/categoria mais usados em transações com
+    # descrição parecida (quando não há nenhum lançamento candidato pra
+    # vincular direto), olhamos até esse tanto de lançamentos históricos
+    # mais recentes — suficiente pra pegar o padrão sem escanear a tabela
+    # inteira em clientes com anos de histórico.
+    HISTORICO_LIMITE = 300
+
+    @staticmethod
+    def _normalizar_texto(texto):
+        """Minúsculas e sem números — números de documento/referência
+        variam a cada lançamento do mesmo fornecedor recorrente, e
+        atrapalhariam a comparação de similaridade do nome/descrição em
+        si (ex.: "TED FULANO LTDA 001234" vs "TED FULANO LTDA 009876")."""
+
+        texto = (texto or "").lower()
+
+        texto = re.sub(r"\d+", "", texto)
+
+        texto = re.sub(r"\s+", " ", texto).strip()
+
+        return texto
+
+    @staticmethod
+    def _similaridade_descricao(a, b):
+
+        a = BankReconciliationService._normalizar_texto(a)
+
+        b = BankReconciliationService._normalizar_texto(b)
+
+        if not a or not b:
+            return 0.0
+
+        return SequenceMatcher(None, a, b).ratio()
+
+    @staticmethod
+    def _sugerir_contato_categoria_por_historico(
+        db,
+        current_user,
+        transaction,
+        Model
+    ):
+        """Quando não existe nenhum lançamento candidato pra vincular
+        (nem por valor+data, nem por descrição parecida), ainda dá pra
+        ajudar: olha o histórico de lançamentos desse cliente com
+        descrição parecida com a da transação e sugere o contato e a
+        categoria mais usados nesses casos — só pra pré-preencher o
+        formulário de "Criar lançamento", nunca pra vincular sozinho."""
+
+        historico = (
+            db.query(Model)
+            .filter(
+                Model.tenant_id
+                == current_user.tenant_id,
+
+                Model.client_id
+                == transaction.client_id,
+            )
+            .order_by(
+                Model.vencimento.desc()
+            )
+            .limit(
+                BankReconciliationService
+                .HISTORICO_LIMITE
+            )
+            .all()
+        )
+
+        candidatos = [
+            item for item in historico
+            if BankReconciliationService
+            ._similaridade_descricao(
+                transaction.descricao,
+                item.descricao
+            )
+            >= BankReconciliationService
+            .SIMILARIDADE_MINIMA
+        ]
+
+        if not candidatos:
+            return None, None, None
+
+        contato_mais_usado = Counter(
+            item.financial_contact_id
+            for item in candidatos
+        ).most_common(1)[0][0]
+
+        # Categoria/subcategoria mais usada especificamente entre os
+        # lançamentos desse mesmo contato (não do grupo todo) — mais
+        # preciso do que só "a categoria mais comum entre parecidos",
+        # já que fornecedores diferentes tendem a cair em categorias
+        # diferentes mesmo com descrição de transação parecida.
+        do_contato = [
+            item for item in candidatos
+            if item.financial_contact_id
+            == contato_mais_usado
+        ]
+
+        categoria_mais_usada = Counter(
+            item.category_id
+            for item in do_contato
+        ).most_common(1)[0][0]
+
+        subcategorias_da_categoria = [
+            item.subcategory_id
+            for item in do_contato
+            if item.category_id
+            == categoria_mais_usada
+            and item.subcategory_id
+        ]
+
+        subcategoria_mais_usada = (
+            Counter(
+                subcategorias_da_categoria
+            ).most_common(1)[0][0]
+            if subcategorias_da_categoria
+            else None
+        )
+
+        return (
+            contato_mais_usado,
+            categoria_mais_usada,
+            subcategoria_mais_usada,
+        )
 
     @staticmethod
     def create_reconciliation(
@@ -399,11 +538,20 @@ class BankReconciliationService:
         """Para cada transação bancária ainda não conciliada (e não
         ignorada/processada), procura um lançamento já existente — conta
         a pagar ou a receber, ainda não vinculado a nenhuma conciliação —
-        que pareça corresponder a ela: mesmo cliente, mesmo valor,
-        vencimento igual ou próximo. É a base da tela de Conciliação no
-        estilo Conta Azul: em vez de só listar a transação e pedir pra
-        preencher tudo de novo, já mostra o candidato ao lado (quando
-        existe) pra conciliar num clique só."""
+        que pareça corresponder a ela: mesmo cliente, mesmo valor, e
+        vencimento igual (EXATO), próximo até 5 dias (PROXIMO) ou, se
+        nada bater por data, descrição parecida o bastante com a de um
+        lançamento já existente do mesmo cliente/tipo (PARECIDO) — ex.:
+        mesmo fornecedor recorrente, mas o vencimento cadastrado ficou
+        longe da data real do débito. Quando não há candidato nenhum pra
+        vincular, ainda sugerimos o contato/categoria mais usados em
+        lançamentos com descrição parecida, só pra pré-preencher o
+        formulário de "Criar lançamento" — nunca pra vincular sozinho.
+
+        É a base da tela de Conciliação no estilo Conta Azul: em vez de
+        só listar a transação e pedir pra preencher tudo de novo, já
+        mostra o melhor candidato ao lado (quando existe) pra conciliar
+        num clique só."""
 
         transactions = (
             db.query(BankTransaction)
@@ -457,153 +605,157 @@ class BankReconciliationService:
 
             match = None
 
-            inicio = (
-                transaction.data_transacao
-                - timedelta(
-                    days=BankReconciliationService
-                    .TOLERANCIA_DIAS_SUGESTAO
-                )
+            is_credito = (
+                transaction.tipo == "CREDITO"
             )
 
-            fim = (
-                transaction.data_transacao
-                + timedelta(
-                    days=BankReconciliationService
-                    .TOLERANCIA_DIAS_SUGESTAO
-                )
+            Model = (
+                AccountsReceivable
+                if is_credito
+                else AccountsPayable
             )
 
-            if transaction.tipo == "CREDITO":
+            tipo_match = (
+                "RECEIVABLE"
+                if is_credito
+                else "PAYABLE"
+            )
 
-                candidatos = (
-                    db.query(AccountsReceivable)
-                    .filter(
-                        AccountsReceivable.tenant_id
-                        == current_user.tenant_id,
+            ids_vinculados = (
+                receivable_ids_vinculados
+                if is_credito
+                else payable_ids_vinculados
+            )
 
-                        AccountsReceivable.client_id
-                        == transaction.client_id,
+            # Mesmo valor é sempre exigido (não implementamos valor
+            # aproximado — o risco de sugerir o lançamento errado não
+            # compensa); o que muda agora é que vencimento distante não
+            # descarta mais o candidato de cara, só rebaixa a confiança
+            # se a descrição ainda assim for parecida o bastante.
+            candidatos = (
+                db.query(Model)
+                .filter(
+                    Model.tenant_id
+                    == current_user.tenant_id,
 
-                        AccountsReceivable.valor
-                        == transaction.valor,
+                    Model.client_id
+                    == transaction.client_id,
 
-                        AccountsReceivable.vencimento
-                        >= inicio,
+                    Model.valor
+                    == transaction.valor,
+                )
+                .all()
+            )
 
-                        AccountsReceivable.vencimento
-                        <= fim,
-                    )
-                    .order_by(
-                        AccountsReceivable.vencimento.asc()
-                    )
-                    .all()
+            avaliados = []
+
+            for item in candidatos:
+
+                if item.id in ids_vinculados:
+                    continue
+
+                dias = abs(
+                    (
+                        item.vencimento
+                        - transaction.data_transacao
+                    ).days
                 )
 
-                candidatos = [
-                    item for item in candidatos
-                    if item.id
-                    not in receivable_ids_vinculados
-                ]
+                if dias == 0:
+                    confianca = "EXATO"
 
-                if candidatos:
+                elif (
+                    dias
+                    <= BankReconciliationService
+                    .TOLERANCIA_DIAS_SUGESTAO
+                ):
+                    confianca = "PROXIMO"
 
-                    melhor = min(
-                        candidatos,
-                        key=lambda item: abs(
-                            (
-                                item.vencimento
-                                - transaction.data_transacao
-                            ).days
+                else:
+
+                    similaridade = (
+                        BankReconciliationService
+                        ._similaridade_descricao(
+                            transaction.descricao,
+                            item.descricao
                         )
                     )
 
-                    match = {
-                        "tipo": "RECEIVABLE",
-                        "id": melhor.id,
-                        "descricao": melhor.descricao,
-                        "valor": melhor.valor,
-                        "vencimento": melhor.vencimento,
-                        "financial_contact_id":
-                            melhor.financial_contact_id,
-                        "category_id":
-                            melhor.category_id,
-                        "subcategory_id":
-                            melhor.subcategory_id,
-                        "confianca": (
-                            "EXATO"
-                            if melhor.vencimento
-                            == transaction.data_transacao
-                            else "PROXIMO"
-                        ),
-                    }
+                    if (
+                        similaridade
+                        < BankReconciliationService
+                        .SIMILARIDADE_MINIMA
+                    ):
+                        continue
 
-            elif transaction.tipo == "DEBITO":
+                    confianca = "PARECIDO"
 
-                candidatos = (
-                    db.query(AccountsPayable)
-                    .filter(
-                        AccountsPayable.tenant_id
-                        == current_user.tenant_id,
-
-                        AccountsPayable.client_id
-                        == transaction.client_id,
-
-                        AccountsPayable.valor
-                        == transaction.valor,
-
-                        AccountsPayable.vencimento
-                        >= inicio,
-
-                        AccountsPayable.vencimento
-                        <= fim,
-                    )
-                    .order_by(
-                        AccountsPayable.vencimento.asc()
-                    )
-                    .all()
+                avaliados.append(
+                    (item, dias, confianca)
                 )
 
-                candidatos = [
-                    item for item in candidatos
-                    if item.id
-                    not in payable_ids_vinculados
-                ]
+            if avaliados:
 
-                if candidatos:
+                ordem_confianca = {
+                    "EXATO": 0,
+                    "PROXIMO": 1,
+                    "PARECIDO": 2,
+                }
 
-                    melhor = min(
-                        candidatos,
-                        key=lambda item: abs(
-                            (
-                                item.vencimento
-                                - transaction.data_transacao
-                            ).days
-                        )
+                melhor, _, confianca = min(
+                    avaliados,
+                    key=lambda avaliado: (
+                        ordem_confianca[
+                            avaliado[2]
+                        ],
+                        avaliado[1],
                     )
+                )
 
-                    match = {
-                        "tipo": "PAYABLE",
-                        "id": melhor.id,
-                        "descricao": melhor.descricao,
-                        "valor": melhor.valor,
-                        "vencimento": melhor.vencimento,
-                        "financial_contact_id":
-                            melhor.financial_contact_id,
-                        "category_id":
-                            melhor.category_id,
-                        "subcategory_id":
-                            melhor.subcategory_id,
-                        "confianca": (
-                            "EXATO"
-                            if melhor.vencimento
-                            == transaction.data_transacao
-                            else "PROXIMO"
-                        ),
-                    }
+                match = {
+                    "tipo": tipo_match,
+                    "id": melhor.id,
+                    "descricao": melhor.descricao,
+                    "valor": melhor.valor,
+                    "vencimento": melhor.vencimento,
+                    "financial_contact_id":
+                        melhor.financial_contact_id,
+                    "category_id":
+                        melhor.category_id,
+                    "subcategory_id":
+                        melhor.subcategory_id,
+                    "confianca": confianca,
+                }
+
+            sugestao_contato = None
+            sugestao_categoria = None
+            sugestao_subcategoria = None
+
+            if not match:
+
+                (
+                    sugestao_contato,
+                    sugestao_categoria,
+                    sugestao_subcategoria,
+                ) = (
+                    BankReconciliationService
+                    ._sugerir_contato_categoria_por_historico(
+                        db,
+                        current_user,
+                        transaction,
+                        Model
+                    )
+                )
 
             results.append({
                 "transaction_id": transaction.id,
                 "match": match,
+                "sugestao_financial_contact_id":
+                    sugestao_contato,
+                "sugestao_category_id":
+                    sugestao_categoria,
+                "sugestao_subcategory_id":
+                    sugestao_subcategoria,
             })
 
         return results
