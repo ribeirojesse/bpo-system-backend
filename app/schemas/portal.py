@@ -112,16 +112,50 @@ class PortalLancamentoSchema(BaseModel):
     categoria_nome: Optional[str] = None
 
 
+class PortalBreakdownItemSchema(BaseModel):
+
+    # Uma linha de quebra por categoria/subcategoria/fornecedor. "outros"
+    # marca o agregado do que passou do teto de séries coloridas do
+    # gráfico (ver dataviz skill) — nunca uma categoria de verdade.
+    id: str
+
+    nome: str
+
+    valor: Decimal
+
+    outros: bool = False
+
+
+class PortalEvolucaoMensalSchema(BaseModel):
+
+    mes: str
+
+    pago: Decimal
+
+    recebido: Decimal
+
+
 class PortalDashboardSchema(BaseModel):
 
-    saldo_contas: Decimal
-
+    # Sem saldo em conta aqui de propósito — o cliente não monitora saldo
+    # bancário nesse sistema, "saldo_inicial" é só um valor de cadastro,
+    # não um saldo mantido/atualizado.
     total_pago: Decimal
 
     total_recebido: Decimal
 
-    total_a_pagar: Decimal
-
-    total_a_receber: Decimal
+    saldo_periodo: Decimal
 
     contas_bancarias: list[PortalContaBancariaSchema] = []
+
+    despesas_por_categoria: list[PortalBreakdownItemSchema] = []
+
+    despesas_por_subcategoria: list[PortalBreakdownItemSchema] = []
+
+    receitas_por_categoria: list[PortalBreakdownItemSchema] = []
+
+    receitas_por_subcategoria: list[PortalBreakdownItemSchema] = []
+
+    maiores_fornecedores: list[PortalBreakdownItemSchema] = []
+
+    evolucao_mensal: list[PortalEvolucaoMensalSchema] = []

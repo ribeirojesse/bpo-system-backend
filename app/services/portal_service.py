@@ -1,4 +1,4 @@
-from sqlalchemy import func
+from decimal import Decimal
 
 from app.models.bank_account import BankAccount
 from app.models.accounts_payable import AccountsPayable
@@ -14,6 +14,16 @@ from app.models.expense_subcategory import ExpenseSubcategory
 # diferente de todo o resto do sistema (rotas /clients, /accounts-*,
 # /bank-*, etc.), que é escopado por tenant_id e restrito a ADMIN.
 
+MESES_PT = [
+    "Jan", "Fev", "Mar", "Abr", "Mai", "Jun",
+    "Jul", "Ago", "Set", "Out", "Nov", "Dez",
+]
+
+# Teto de séries coloridas do gráfico de categoria/subcategoria/fornecedor
+# — mesma regra usada no Dashboard do ADMIN (paleta categórica validada
+# pela dataviz skill). Acima disso, o resto vira "Outras"/"Outros".
+BREAKDOWN_SERIES_CAP = 6
+
 
 class PortalService:
 
@@ -22,51 +32,185 @@ class PortalService:
 
         client_id = current_user.client_id
 
-        saldo_contas = db.query(
-            func.coalesce(func.sum(BankAccount.saldo_inicial), 0)
-        ).filter(
-            BankAccount.client_id == client_id
-        ).scalar()
-
-        total_pago = db.query(
-            func.coalesce(func.sum(AccountsPayable.valor), 0)
-        ).filter(
+        payables_pagos = db.query(AccountsPayable).filter(
             AccountsPayable.client_id == client_id,
             AccountsPayable.status == "PAGO"
-        ).scalar()
+        ).all()
 
-        total_a_pagar = db.query(
-            func.coalesce(func.sum(AccountsPayable.valor), 0)
-        ).filter(
-            AccountsPayable.client_id == client_id,
-            AccountsPayable.status == "PENDENTE"
-        ).scalar()
-
-        total_recebido = db.query(
-            func.coalesce(func.sum(AccountsReceivable.valor), 0)
-        ).filter(
+        receivables_recebidos = db.query(AccountsReceivable).filter(
             AccountsReceivable.client_id == client_id,
             AccountsReceivable.status == "RECEBIDO"
-        ).scalar()
+        ).all()
 
-        total_a_receber = db.query(
-            func.coalesce(func.sum(AccountsReceivable.valor), 0)
-        ).filter(
-            AccountsReceivable.client_id == client_id,
-            AccountsReceivable.status == "PENDENTE"
-        ).scalar()
+        total_pago = sum(
+            (p.valor for p in payables_pagos), Decimal("0")
+        )
 
+        total_recebido = sum(
+            (r.valor for r in receivables_recebidos), Decimal("0")
+        )
+
+        # Sem saldo em conta aqui de propósito (pedido do usuário: "não
+        # monitoramos saldo em conta") — a lista de contas continua só
+        # pra mostrar quais existem (banco/agência/conta), sem somar
+        # nenhum valor de saldo.
         contas_bancarias = db.query(BankAccount).filter(
             BankAccount.client_id == client_id
         ).all()
 
+        category_ids = (
+            {p.category_id for p in payables_pagos} |
+            {r.category_id for r in receivables_recebidos}
+        )
+
+        subcategory_ids = (
+            {p.subcategory_id for p in payables_pagos if p.subcategory_id} |
+            {r.subcategory_id for r in receivables_recebidos if r.subcategory_id}
+        )
+
+        contact_ids = {p.financial_contact_id for p in payables_pagos}
+
+        categorias = {
+            c.id: c.nome
+            for c in db.query(ExpenseCategory).filter(
+                ExpenseCategory.id.in_(category_ids)
+            ).all()
+        } if category_ids else {}
+
+        subcategorias = {
+            s.id: s.nome
+            for s in db.query(ExpenseSubcategory).filter(
+                ExpenseSubcategory.id.in_(subcategory_ids)
+            ).all()
+        } if subcategory_ids else {}
+
+        fornecedores = {
+            c.id: c.nome
+            for c in db.query(FinancialContact).filter(
+                FinancialContact.id.in_(contact_ids)
+            ).all()
+        } if contact_ids else {}
+
+        def montar_breakdown(itens, campo, lookup, rotulo_vazio):
+
+            totais = {}
+
+            for item in itens:
+
+                chave = getattr(item, campo)
+
+                totais[chave] = (
+                    totais.get(chave, Decimal("0")) + item.valor
+                )
+
+            linhas = sorted(
+                (
+                    {
+                        "id": str(chave) if chave else "sem-valor",
+                        "nome": (
+                            lookup.get(chave, rotulo_vazio)
+                            if chave else rotulo_vazio
+                        ),
+                        "valor": valor,
+                        "outros": False,
+                    }
+                    for chave, valor in totais.items()
+                ),
+                key=lambda linha: linha["valor"],
+                reverse=True
+            )
+
+            topo = linhas[:BREAKDOWN_SERIES_CAP]
+
+            resto = linhas[BREAKDOWN_SERIES_CAP:]
+
+            resto_total = sum(
+                (linha["valor"] for linha in resto), Decimal("0")
+            )
+
+            if resto_total > 0:
+
+                topo.append({
+                    "id": "outras",
+                    "nome": "Outras",
+                    "valor": resto_total,
+                    "outros": True,
+                })
+
+            return topo
+
+        despesas_por_categoria = montar_breakdown(
+            payables_pagos, "category_id", categorias, "Sem categoria"
+        )
+
+        despesas_por_subcategoria = montar_breakdown(
+            payables_pagos, "subcategory_id", subcategorias, "Sem subcategoria"
+        )
+
+        receitas_por_categoria = montar_breakdown(
+            receivables_recebidos, "category_id", categorias, "Sem categoria"
+        )
+
+        receitas_por_subcategoria = montar_breakdown(
+            receivables_recebidos, "subcategory_id", subcategorias, "Sem subcategoria"
+        )
+
+        maiores_fornecedores = montar_breakdown(
+            payables_pagos, "financial_contact_id", fornecedores, "Sem fornecedor"
+        )
+
+        evolucao_por_mes = {}
+
+        def acumular_evolucao(itens, campo_data, chave_serie):
+
+            for item in itens:
+
+                data_efetiva = (
+                    getattr(item, campo_data) or item.vencimento
+                )
+
+                if not data_efetiva:
+                    continue
+
+                chave = (data_efetiva.year, data_efetiva.month)
+
+                entrada = evolucao_por_mes.setdefault(
+                    chave,
+                    {"pago": Decimal("0"), "recebido": Decimal("0")}
+                )
+
+                entrada[chave_serie] += item.valor
+
+        acumular_evolucao(
+            payables_pagos, "data_pagamento", "pago"
+        )
+
+        acumular_evolucao(
+            receivables_recebidos, "data_recebimento", "recebido"
+        )
+
+        evolucao_ordenada = sorted(evolucao_por_mes.items())[-6:]
+
+        evolucao_mensal = [
+            {
+                "mes": MESES_PT[mes - 1],
+                "pago": valores["pago"],
+                "recebido": valores["recebido"],
+            }
+            for (ano, mes), valores in evolucao_ordenada
+        ]
+
         return {
-            "saldo_contas": saldo_contas,
             "total_pago": total_pago,
             "total_recebido": total_recebido,
-            "total_a_pagar": total_a_pagar,
-            "total_a_receber": total_a_receber,
+            "saldo_periodo": total_recebido - total_pago,
             "contas_bancarias": contas_bancarias,
+            "despesas_por_categoria": despesas_por_categoria,
+            "despesas_por_subcategoria": despesas_por_subcategoria,
+            "receitas_por_categoria": receitas_por_categoria,
+            "receitas_por_subcategoria": receitas_por_subcategoria,
+            "maiores_fornecedores": maiores_fornecedores,
+            "evolucao_mensal": evolucao_mensal,
         }
 
     @staticmethod

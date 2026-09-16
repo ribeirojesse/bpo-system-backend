@@ -14,7 +14,8 @@ from app.api.endpoints import (
                                 payroll,
                                 payroll_batch,
                                 admin_user,
-                                portal
+                                portal,
+                                dre
                               )
 
 
@@ -111,4 +112,13 @@ api_router.include_router(
     portal.router,
     prefix="/portal",
     tags=["Portal do Cliente"]
+)
+
+# Relatório de DRE — disponível pro ADMIN (qualquer cliente da carteira)
+# e, escopado ao próprio client_id, pelo CLIENTE no portal (ver
+# app/api/endpoints/dre.py e app/services/dre_service.py).
+api_router.include_router(
+    dre.router,
+    prefix="/dre",
+    tags=["DRE"]
 )

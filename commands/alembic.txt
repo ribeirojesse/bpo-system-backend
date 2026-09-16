@@ -2,7 +2,7 @@ Criar migration
 alembic revision --autogenerate -m "mensagem"
 
 Aplicar migrations
-alembic upgrade head
+docker exec -it bpo_api alembic upgrade head
 
 Voltar migration
 alembic downgrade -1

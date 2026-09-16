@@ -5,6 +5,8 @@ ofxparse
 
 pdfplumber
 
+reportlab
+
 sqlalchemy
 psycopg2-binary
 alembic
