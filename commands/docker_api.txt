@@ -1,5 +1,0 @@
-Acessar api docker:
-docker exec -it bpo_api bash
-
-logs:
-docker logs -f bpo_api

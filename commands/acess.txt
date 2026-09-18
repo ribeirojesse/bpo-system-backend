@@ -1,6 +1,0 @@
-ADMIN
-usuario: js@js.com   senha: 12345678
-
-
-SUPERADMIN:
-usuario: jesse@hooked.com  senha: 9GF5s3vgwA

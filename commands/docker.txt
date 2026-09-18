@@ -1,6 +1,0 @@
-build container:
-docker compose up --build
-
-derrubar container:
-docker compose down
-
