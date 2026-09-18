@@ -9,6 +9,7 @@ logs
 *.logs
 
 uploads/
+commands/
 
 # NÃO ignorar alembic/versions/ — são as migrations do banco e
 # precisam ser versionadas para o schema ser reproduzível em outro

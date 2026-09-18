@@ -15,7 +15,8 @@ from app.api.endpoints import (
                                 payroll_batch,
                                 admin_user,
                                 portal,
-                                dre
+                                dre,
+                                closing_schedule
                               )
 
 
@@ -121,4 +122,12 @@ api_router.include_router(
     dre.router,
     prefix="/dre",
     tags=["DRE"]
+)
+
+# Cronograma de fechamentos — exclusivo do ADMIN, sem exposição no
+# portal do CLIENTE (ver app/api/endpoints/closing_schedule.py).
+api_router.include_router(
+    closing_schedule.router,
+    prefix="/closing-schedules",
+    tags=["Cronograma"]
 )
