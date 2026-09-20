@@ -1,0 +1,30 @@
+# Segredos e configuração local — nunca devem entrar na imagem
+.env
+.env.*
+!.env.example
+
+# Controle de versão
+.git
+.gitignore
+
+# Ambiente virtual Python (instalado de novo dentro da imagem)
+venv/
+.venv/
+
+# Bytecode / cache
+__pycache__/
+*.pyc
+.pytest_cache/
+.mypy_cache/
+
+# Dados locais que não devem ir para a imagem
+uploads/
+
+# Editores / SO
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Documentação/auxiliares que não são necessários em runtime
+commands/

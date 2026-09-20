@@ -1,0 +1,64 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Logs
+logs
+*.logs
+
+
+uploads/
+commands/*.txt
+#deploy/
+
+# NÃO ignorar alembic/versions/ — são as migrations do banco e
+# precisam ser versionadas para o schema ser reproduzível em outro
+# ambiente (deploy, CI, clone novo do repositório).
+alembic/versions/__pycache__/
+alembic/__pycache__/
+
+# Environment variables
+.env
+.env.*
+!.env.example
+
+# IDEs and editors
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Coverage
+coverage/
+
+# Cache
+.cache/
+.eslintcache
+
+# TypeScript
+*.tsbuildinfo
+
+# Temporary files
+tmp/
+temp/
+
+# Local Netlify folder
+.netlify/
+
+# Local Vercel folder
+.vercel/
+
+# Docker
+docker-compose.override.yml
+
+# Firebase
+.firebase/

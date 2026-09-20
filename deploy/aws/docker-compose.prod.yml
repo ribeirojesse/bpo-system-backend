@@ -1,0 +1,33 @@
+# docker-compose de PRODUÇÃO — roda na EC2.
+#
+# Diferenças em relação ao docker-compose.yml original (dev):
+#   - Sem serviço "postgres" local: usa o RDS (endereço vem do .env).
+#   - Sem serviço "pgadmin": nunca fica exposto num servidor com IP público
+#     (era um dos achados críticos da auditoria de segurança). Pra
+#     administrar o banco em produção, use um túnel SSH (ver DEPLOY.md).
+#   - Sem bind mount ".:/app": a imagem é buildada com o código, não fica
+#     lendo do disco do host (isso também é o que já faz o --reload
+#     desligar em produção, via ENVIRONMENT=production no .env).
+#   - Porta 80 do host -> 8000 do container, pra acessar direto por HTTP
+#     sem precisar digitar :8000 na URL (adicionar HTTPS depois é o
+#     próximo passo natural, com Nginx + Certbot, uma vez que houver domínio).
+#
+# Coloque este arquivo na raiz do backend na EC2 (mesmo nível do
+# Dockerfile) e rode: docker compose -f docker-compose.prod.yml up -d --build
+
+name: bpo-system
+
+services:
+  api:
+    build: .
+    container_name: bpo_api
+    restart: unless-stopped
+    ports:
+      - "80:8000"
+    env_file:
+      - .env
+    volumes:
+      - uploads_data:/app/uploads
+
+volumes:
+  uploads_data:

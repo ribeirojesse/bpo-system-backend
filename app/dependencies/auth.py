@@ -1,0 +1,85 @@
+from jose import jwt, JWTError
+
+from fastapi import (
+    Depends,
+    HTTPException,
+    status
+)
+
+from fastapi.security import OAuth2PasswordBearer
+
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
+from app.core.database import get_db
+from app.core.security import is_access_token
+
+from app.models.user import User
+
+
+oauth2_scheme = OAuth2PasswordBearer(
+    tokenUrl="/api/routes/auth/login"
+)
+
+
+def get_current_user(
+    token: str = Depends(oauth2_scheme),
+    db: Session = Depends(get_db)
+):
+
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Token inválido"
+    )
+
+    try:
+
+        payload = jwt.decode(
+            token,
+            settings.SECRET_KEY,
+            algorithms=[settings.ALGORITHM]
+        )
+
+        user_id = payload.get("sub")
+
+        if user_id is None:
+            raise credentials_exception
+
+        # Garante que apenas access tokens autenticam rotas protegidas
+        # (um refresh token não pode ser usado como Bearer token).
+        if not is_access_token(payload):
+            raise credentials_exception
+
+    except JWTError:
+        raise credentials_exception
+
+    user = db.query(User).filter(
+        User.id == user_id
+    ).first()
+
+    if not user:
+        raise credentials_exception
+
+    return user
+
+
+def require_role(*roles: str):
+    """
+    Dependency factory para restringir uma rota a um ou mais roles.
+
+    Uso: current_user: User = Depends(require_role("SUPER_ADMIN"))
+    """
+
+    def dependency(
+        current_user: User = Depends(get_current_user)
+    ):
+
+        if current_user.role not in roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Acesso negado para este perfil de usuário"
+            )
+
+        return current_user
+
+    return dependency
