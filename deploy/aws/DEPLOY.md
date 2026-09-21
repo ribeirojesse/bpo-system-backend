@@ -147,7 +147,8 @@ ssh ec2-user@<ec2_public_ip> '
 '
 
 # 2. copia os arquivos de produção deste pacote (docker-compose.prod.yml,
-#    o script de backup e o template de .env) pra dentro de ~/app
+#    a config do nginx, o script de backup e o template de .env) pra
+#    dentro de ~/app
 scp D:/00_DEV/00_Projetos/bpo-system/backend/deploy/aws/docker-compose.prod.yml \
     ec2-user@<ec2_public_ip>:~/app/
 scp D:/00_DEV/00_Projetos/bpo-system/backend/deploy/aws/env.production.example \
@@ -155,6 +156,11 @@ scp D:/00_DEV/00_Projetos/bpo-system/backend/deploy/aws/env.production.example \
 ssh ec2-user@<ec2_public_ip> mkdir -p ~/app/scripts
 scp D:/00_DEV/00_Projetos/bpo-system/backend/deploy/aws/scripts/backup_to_s3.sh \
     ec2-user@<ec2_public_ip>:~/app/scripts/
+ssh ec2-user@<ec2_public_ip> mkdir -p ~/app/nginx/conf.d ~/app/nginx/templates
+scp D:/00_DEV/00_Projetos/bpo-system/backend/deploy/aws/nginx/conf.d/app.conf \
+    ec2-user@<ec2_public_ip>:~/app/nginx/conf.d/
+scp D:/00_DEV/00_Projetos/bpo-system/backend/deploy/aws/nginx/templates/app.conf.https \
+    ec2-user@<ec2_public_ip>:~/app/nginx/templates/
 ```
 
 **Opção B — git clone**, se o backend já estiver num repositório (GitHub/GitLab):
@@ -166,7 +172,7 @@ mv app-src/* ~/app/ 2>/dev/null
 rm -rf app-src ~/app/venv
 ```
 (depois, repita o passo 2 acima pra copiar `docker-compose.prod.yml`,
-`env.production.example` e `scripts/backup_to_s3.sh`)
+`env.production.example`, `scripts/backup_to_s3.sh` e a pasta `nginx/`)
 
 ## 4. Configurar o `.env` de produção
 
@@ -215,7 +221,9 @@ curl http://<ec2_public_ip>/
 ```
 
 No navegador: `http://<ec2_public_ip>/docs` mostra o Swagger (considere
-desativar isso depois em produção — ver seção 9).
+desativar isso depois em produção — ver seção 10). Depois de configurar o
+domínio e HTTPS (seção 9), passe a usar `https://api.towerbpo.com` em vez
+do IP.
 
 ## 8. Backups automáticos pro S3
 
@@ -234,7 +242,151 @@ Adicione uma linha pra rodar todo dia às 3h da manhã:
 0 3 * * * /home/ec2-user/app/scripts/backup_to_s3.sh >> /home/ec2-user/backup.log 2>&1
 ```
 
-## 9. Recomendações de segurança (baseado na auditoria do projeto)
+## 9. HTTPS com domínio (Nginx + Certbot)
+
+Domínio: `towerbpo.com`, API em `api.towerbpo.com`. Domínio registrado na
+Hostinger, DNS gerenciado pela Cloudflare.
+
+### 9.0 Hostinger → Cloudflare (mover o DNS pra lá)
+
+1. Crie uma conta grátis em https://dash.cloudflare.com/sign-up (se ainda
+   não tiver).
+2. No dashboard: **Add a site** → digite `towerbpo.com` → escolha o plano
+   **Free**.
+3. A Cloudflare escaneia os registros DNS que já existem na Hostinger e
+   importa automaticamente. Não precisa conferir cada um agora — o
+   registro da API a gente cria do zero na seção 9.1.
+4. Na tela seguinte ela mostra 2 nameservers, parecido com:
+   ```
+   ana.ns.cloudflare.com
+   bob.ns.cloudflare.com
+   ```
+   (os nomes reais variam por conta — use exatamente os que aparecerem
+   pra você, não esses do exemplo.)
+5. Na Hostinger: **hPanel → Domínios → towerbpo.com → Nameservers**.
+   Troque de "Nameservers da Hostinger" pra "Nameservers personalizados"
+   e cole os dois que a Cloudflare te deu. Salve.
+6. Volte no Cloudflare e clique em **Done, check nameservers** (ou só
+   aguarde — ele confere sozinho). A propagação pode levar de minutos até
+   ~24h (na prática costuma ficar pronto em 15min–2h). Chega um e-mail da
+   Cloudflare avisando quando o domínio fica **Active**.
+7. Enquanto isso não termina, o domínio continua respondendo normalmente
+   pelos nameservers antigos da Hostinger — não derruba nada nesse
+   meio-tempo, mas os passos abaixo (9.1 em diante) só valem depois do
+   domínio aparecer como Active no Cloudflare.
+
+### 9.1 Cloudflare — DNS
+
+No painel do Cloudflare, aba **DNS**, adicione:
+
+| Tipo | Nome | Conteúdo | Proxy status |
+|---|---|---|---|
+| A | `api` | `<ec2_public_ip>` (o Elastic IP, ex. `18.228.230.92`) | **DNS only** (nuvem cinza) |
+
+Deixe **DNS only** (proxy desligado) por enquanto — é o Certbot que
+precisa bater direto no IP da EC2 pra validar o domínio, e com o proxy da
+Cloudflare ligado isso complica sem necessidade nessa primeira emissão.
+Depois que o HTTPS estiver funcionando, dá pra ligar o proxy da Cloudflare
+(nuvem laranja) pra ganhar proteção extra (esconde o IP real da EC2, WAF,
+mitigação de DDoS) — te aviso como ajustar o modo SSL certo nesse momento,
+se quiser.
+
+Se também já quiser reservar o domínio raiz pra um site/frontend futuro,
+pode adicionar `A` / `@` / mesmo IP / DNS only — hoje isso não expõe nada,
+porque o nginx (seção abaixo) só responde pro `Host: api.towerbpo.com`; pra
+qualquer outro nome ele fecha a conexão sem responder.
+
+Propagação costuma levar de alguns minutos a ~15min. Confira com:
+
+```bash
+nslookup api.towerbpo.com
+```
+(ou https://dnschecker.org/#A/api.towerbpo.com — quando aparecer o IP da
+EC2 na maioria dos servidores, pode seguir.)
+
+### 9.2 Arquivos deste pacote
+
+Este pacote já inclui:
+- `nginx/conf.d/app.conf` — config **bootstrap**: só HTTP, com a rota
+  `/.well-known/acme-challenge/` que o Certbot usa pra provar que você é
+  dono do domínio. É essa que vai valer primeiro.
+- `nginx/templates/app.conf.https` — config **final**: HTTP redireciona
+  pra HTTPS, API só responde em 443 com certificado válido + headers de
+  segurança (HSTS, X-Frame-Options, etc). Só entra em uso depois que o
+  certificado existir.
+- `docker-compose.prod.yml` já atualizado com os serviços `nginx` e
+  `certbot` (a `api` não expõe mais porta pro host, só fala com o nginx
+  pela rede interna do compose).
+
+Copie esses arquivos pra EC2 junto com o resto (seção 3, passo 2, já
+inclui os comandos de `scp` pra pasta `nginx/`).
+
+### 9.3 Subir com a config bootstrap e emitir o certificado
+
+Na EC2, dentro de `~/app` (depois de já ter rodado a seção 5, containers
+no ar):
+
+```bash
+docker compose -f docker-compose.prod.yml up -d
+```
+
+Confirme que dá pra bater no domínio por HTTP (já deve funcionar, mesmo
+sem HTTPS ainda):
+
+```bash
+curl http://api.towerbpo.com/
+```
+
+Agora emita o certificado (troque o e-mail se quiser usar outro pra
+avisos de expiração — a Let's Encrypt manda esses avisos, não a AWS):
+
+```bash
+docker compose -f docker-compose.prod.yml run --rm --entrypoint "\
+  certbot certonly --webroot -w /var/www/certbot \
+  -d api.towerbpo.com \
+  --email jesse.araujo.silva@outlook.com --agree-tos --no-eff-email" certbot
+```
+
+Se aparecer "Congratulations! ... Successfully received certificate", deu
+certo — o certificado fica guardado no volume `certbot_conf`, persistente
+entre restarts.
+
+### 9.4 Trocar pra config final (HTTPS)
+
+```bash
+cp nginx/templates/app.conf.https nginx/conf.d/app.conf
+docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+```
+
+Teste:
+
+```bash
+curl -I https://api.towerbpo.com/
+curl http://api.towerbpo.com/   # deve dar redirect 301 pra https
+```
+
+No navegador, `https://api.towerbpo.com/docs` deve abrir com o cadeado.
+A partir daqui, use sempre a URL `https://api.towerbpo.com` (no frontend,
+no `ALLOWED_ORIGINS`, em qualquer lugar que hoje aponte pro IP) — o IP
+direto continua existindo mas passa a ser só um detalhe de
+infraestrutura, não a forma de acessar o sistema.
+
+### 9.5 Renovação automática
+
+O container `certbot` já fica rodando em loop chamando `certbot renew` a
+cada 12h (só renova de fato quando faltar menos de 30 dias pro
+vencimento — o certificado dura 90). Só falta o nginx recarregar depois
+de uma renovação, pra pegar o certificado novo — adicione ao cron da EC2
+(o mesmo `crontab -e` do backup, seção 8):
+
+```
+0 4 * * 0 cd /home/ec2-user/app && docker compose -f docker-compose.prod.yml exec -T nginx nginx -s reload >> /home/ec2-user/nginx-reload.log 2>&1
+```
+
+(recarrega toda semana, domingo 4h — reload não derruba conexões, é
+seguro rodar mesmo sem ter havido renovação naquela semana.)
+
+## 10. Recomendações de segurança (baseado na auditoria do projeto)
 
 Isso não é feito automaticamente por este pacote de deploy — são ajustes
 no código/config que valem a pena antes de considerar isso "produção de
@@ -242,18 +394,71 @@ verdade":
 
 - Trocar a senha padrão do fallback de `set_portal_access`
   (`Cliente@123`) por uma senha aleatória por cliente.
-- Desativar `/docs` e `/openapi.json` em produção (`FastAPI(docs_url=None,
-  redoc_url=None)` quando `ENVIRONMENT=production`).
-- Mover o `token`/`refreshToken` do `localStorage` do frontend pra cookie
-  `httpOnly` (reforço de defesa contra XSS).
-- Quando o frontend também for pra produção: parar de usar
-  `http://localhost:8000` fixo no `axios.js` (usar
-  `VITE_API_URL`) e servir tudo via HTTPS.
-- Quando tiver um domínio: colocar Nginx + Certbot na frente da API (porta
-  443) em vez de expor HTTP puro na 80. A infraestrutura já libera a porta
-  443 no security group pra isso.
+- ~~Desativar `/docs` e `/openapi.json` em produção~~ — feito no código
+  (`app/main.py`, condicional a `ENVIRONMENT=production`). Falta só
+  reimplantar o backend atualizado na EC2 (seção 9.6 abaixo).
+- ~~Mover o `token`/`refreshToken` do `localStorage` do frontend pra
+  cookie `httpOnly`~~ — feito no código (backend: `app/api/endpoints/auth.py`,
+  `app/dependencies/auth.py`, `app/core/config.py`; frontend:
+  `axios.js`, `authSlice.js`, `AuthInitializer.jsx`, `useAuth.js`,
+  `authService.js`). Falta reimplantar os dois lados (seção 9.6) e
+  configurar `COOKIE_DOMAIN=.towerbpo.com` no `.env` da EC2.
+- ~~Quando o frontend também for pra produção: parar de usar
+  `http://localhost:8000` fixo no `axios.js`~~ — feito (`VITE_API_URL`,
+  com fallback pro comportamento antigo em dev). Falta configurar essa
+  variável no projeto da Vercel quando publicar.
+- ~~Quando tiver um domínio: colocar Nginx + Certbot na frente da API~~ —
+  feito, ver seção 9.
 
-## 10. Administrar o RDS sem expor a porta 5432
+### 9.6 Reimplantar backend + frontend depois dessas mudanças
+
+Backend — os arquivos que mudaram (`main.py`, `core/config.py`,
+`dependencies/auth.py`, `api/endpoints/auth.py`) precisam ir pra EC2.
+Como `~/app` lá não é um clone git (ver conversa sobre isso), reenvie
+por `scp` mesmo:
+
+```bash
+scp D:/00_DEV/00_Projetos/bpo-system/backend/app/main.py ec2-user@18.228.230.92:~/app/app/
+scp D:/00_DEV/00_Projetos/bpo-system/backend/app/core/config.py ec2-user@18.228.230.92:~/app/app/core/
+scp D:/00_DEV/00_Projetos/bpo-system/backend/app/dependencies/auth.py ec2-user@18.228.230.92:~/app/app/dependencies/
+scp D:/00_DEV/00_Projetos/bpo-system/backend/app/api/endpoints/auth.py ec2-user@18.228.230.92:~/app/app/api/endpoints/
+```
+
+Na EC2, atualize o `.env` (`nano ~/app/.env`) — ajuste `ALLOWED_ORIGINS`
+pro domínio real do frontend e adicione a linha nova:
+
+```
+ALLOWED_ORIGINS=https://towerbpo.com
+COOKIE_DOMAIN=.towerbpo.com
+```
+
+Reconstrua e suba de novo:
+
+```bash
+cd ~/app
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Teste o login (via navegador, já que o `/docs` fica desativado em
+produção a partir de agora): abra `https://api.towerbpo.com` — se
+responder `{"message":"API ONLINE"}` o container subiu certo. O teste
+de verdade do cookie só dá pra fazer a partir do frontend (próximo
+passo), já que é ele quem faz o `POST /auth/login`.
+
+Frontend — quando publicar na Vercel, em **Project Settings →
+Environment Variables**, adicione:
+
+```
+VITE_API_URL=https://api.towerbpo.com
+```
+
+Depois do deploy, teste o fluxo completo de login pelo navegador e
+confira nas DevTools (aba Application/Storage → Cookies) que
+`access_token` e `refresh_token` aparecem como cookies `HttpOnly` do
+domínio `api.towerbpo.com` — e que não existe mais `token`/`refreshToken`
+no `localStorage`.
+
+## 11. Administrar o RDS sem expor a porta 5432
 
 O banco não tem IP público (por isso não roda pgAdmin público como no
 compose de dev). Pra acessar com um cliente local (DBeaver, pgAdmin
@@ -265,7 +470,7 @@ ssh -L 5433:<rds_address>:5432 ec2-user@<ec2_public_ip>
 
 E conecte seu cliente em `localhost:5433`.
 
-## 11. Atualizar a aplicação depois de mudanças no código
+## 12. Atualizar a aplicação depois de mudanças no código
 
 ```bash
 # reenvie o código atualizado (scp ou git pull), depois:
@@ -274,7 +479,7 @@ docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml exec api alembic upgrade head   # se houver migration nova
 ```
 
-## 12. Desligar tudo (evitar qualquer cobrança)
+## 13. Desligar tudo (evitar qualquer cobrança)
 
 ```bash
 cd terraform

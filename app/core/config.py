@@ -23,6 +23,14 @@ class Settings(BaseSettings):
     # funciona; em produção, configurar via variável de ambiente.
     ALLOWED_ORIGINS: str = "http://localhost:5173"
 
+    # Domínio usado no cookie de sessão (access_token/refresh_token).
+    # Vazio (padrão) = cookie "host-only", funciona sozinho em localhost.
+    # Em produção, use ".towerbpo.com" (com o ponto na frente) — assim o
+    # cookie emitido por api.towerbpo.com também é enviado em requisições
+    # pra api.towerbpo.com vindas de páginas em towerbpo.com (mesmo
+    # domínio raiz = cookie tratado como "mesmo site" pelo navegador).
+    COOKIE_DOMAIN: str = ""
+
     class Config:
         env_file = ".env"
 

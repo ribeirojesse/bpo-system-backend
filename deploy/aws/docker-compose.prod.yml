@@ -8,9 +8,10 @@
 #   - Sem bind mount ".:/app": a imagem é buildada com o código, não fica
 #     lendo do disco do host (isso também é o que já faz o --reload
 #     desligar em produção, via ENVIRONMENT=production no .env).
-#   - Porta 80 do host -> 8000 do container, pra acessar direto por HTTP
-#     sem precisar digitar :8000 na URL (adicionar HTTPS depois é o
-#     próximo passo natural, com Nginx + Certbot, uma vez que houver domínio).
+#   - A "api" não expõe mais porta pro host: só fala com o "nginx" pela
+#     rede interna do compose. Quem recebe tráfego de fora (80/443) é o
+#     nginx, que já vem com HTTPS via Let's Encrypt (Certbot) — ver seção 9
+#     do DEPLOY.md.
 #
 # Coloque este arquivo na raiz do backend na EC2 (mesmo nível do
 # Dockerfile) e rode: docker compose -f docker-compose.prod.yml up -d --build
@@ -22,12 +23,41 @@ services:
     build: .
     container_name: bpo_api
     restart: unless-stopped
-    ports:
-      - "80:8000"
+    expose:
+      - "8000"
     env_file:
       - .env
     volumes:
       - uploads_data:/app/uploads
 
+  nginx:
+    image: nginx:alpine
+    container_name: bpo_nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - certbot_www:/var/www/certbot:ro
+      - certbot_conf:/etc/letsencrypt:ro
+    depends_on:
+      - api
+
+  certbot:
+    image: certbot/certbot
+    container_name: bpo_certbot
+    volumes:
+      - certbot_www:/var/www/certbot
+      - certbot_conf:/etc/letsencrypt
+    # Fica em loop renovando o certificado quando faltar menos de 30 dias
+    # pra vencer (validade do Let's Encrypt é 90 dias). O nginx não recarrega
+    # sozinho quando o cert é renovado — por isso o cron da seção 9 do
+    # DEPLOY.md também dá um "nginx -s reload" semanal.
+    entrypoint: >
+      /bin/sh -c 'trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot; sleep 12h & wait $${!}; done;'
+
 volumes:
   uploads_data:
+  certbot_www:
+  certbot_conf:

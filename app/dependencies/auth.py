@@ -3,10 +3,9 @@ from jose import jwt, JWTError
 from fastapi import (
     Depends,
     HTTPException,
+    Request,
     status
 )
-
-from fastapi.security import OAuth2PasswordBearer
 
 from sqlalchemy.orm import Session
 
@@ -17,13 +16,8 @@ from app.core.security import is_access_token
 from app.models.user import User
 
 
-oauth2_scheme = OAuth2PasswordBearer(
-    tokenUrl="/api/routes/auth/login"
-)
-
-
 def get_current_user(
-    token: str = Depends(oauth2_scheme),
+    request: Request,
     db: Session = Depends(get_db)
 ):
 
@@ -31,6 +25,14 @@ def get_current_user(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Token inválido"
     )
+
+    # O access token agora vem num cookie httpOnly (não mais no header
+    # Authorization) — setado pelo /auth/login, inacessível a JavaScript
+    # no navegador (proteção contra roubo via XSS).
+    token = request.cookies.get("access_token")
+
+    if not token:
+        raise credentials_exception
 
     try:
 
