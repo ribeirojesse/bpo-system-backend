@@ -1,5 +1,7 @@
 import re
 
+import unicodedata
+
 from collections import Counter
 
 from datetime import timedelta
@@ -11,6 +13,8 @@ from difflib import SequenceMatcher
 from fastapi import HTTPException
 
 from app.models.bank_transaction import BankTransaction
+
+from app.models.financial_contact import FinancialContact
 
 from app.repositories.bank_transaction_repository import (
     BankTransactionRepository
@@ -54,6 +58,14 @@ class BankReconciliationService:
     # centavos, mas bloqueia conciliações com valores muito diferentes).
     TOLERANCIA = Decimal("0.01")
 
+    # Tolerância de valor usada só pra ENCONTRAR candidatos na tela de
+    # Conciliação (nunca pra vincular sozinho — isso continua exigindo um
+    # clique do usuário em "Conciliar"). Cobre casos comuns como boleto
+    # pago com juros/desconto ou taxa de cartão descontada na hora: até
+    # 5% de diferença pro valor do lançamento ainda entra como candidato,
+    # combinado com a descrição pra não virar uma sugestão qualquer.
+    TOLERANCIA_VALOR_PERCENTUAL = Decimal("0.05")
+
     # Mesma janela usada pela conciliação automática (AutoReconciliationService):
     # um lançamento com o mesmo valor e vencimento até 5 dias de distância da
     # transação ainda entra como sugestão (confiança "PROXIMO" — o "Quase lá"
@@ -62,11 +74,15 @@ class BankReconciliationService:
 
     # Quando não há lançamento com valor+data batendo bem, ainda vale
     # sugerir um candidato pela DESCRIÇÃO parecida (ex.: mesmo fornecedor
-    # recorrente, mas com vencimento fora da janela de 5 dias) — vira a
-    # confiança "PARECIDO", abaixo de "PROXIMO". Limiar calibrado contra
-    # descrições reais de extrato: acima disso, na prática só nomes de
-    # fornecedor realmente iguais (ignorando números de documento/
-    # referência, que variam a cada lançamento) passam.
+    # recorrente, mas com vencimento fora da janela de 5 dias, ou valor
+    # dentro da tolerância de 5% mas não idêntico) — vira a confiança
+    # "PARECIDO", abaixo de "PROXIMO". Também é o piso exigido pra aceitar
+    # qualquer candidato com valor APROXIMADO (não exatamente igual):
+    # valor parecido sozinho, sem a descrição bater, não é o suficiente.
+    # Limiar calibrado contra descrições reais de extrato: acima disso,
+    # na prática só nomes de fornecedor realmente iguais (ignorando
+    # números de documento/referência, que variam a cada lançamento)
+    # passam.
     SIMILARIDADE_MINIMA = 0.55
 
     # Pra sugerir contato/categoria mais usados em transações com
@@ -76,18 +92,91 @@ class BankReconciliationService:
     # inteira em clientes com anos de histórico.
     HISTORICO_LIMITE = 300
 
+    # Prefixos comuns de extrato bancário brasileiro que não ajudam em
+    # nada a identificar o fornecedor (o nome vem DEPOIS) — atrapalham a
+    # comparação de similaridade porque são iguais em lançamentos de
+    # fornecedores completamente diferentes. Comparados já sem acento,
+    # minúsculo e sem pontuação, então aqui também ficam assim.
+    _PREFIXOS_BANCARIOS = (
+        "pix recebido de",
+        "pix recebido",
+        "pix enviado para",
+        "pix enviado",
+        "ted recebida de",
+        "ted recebida",
+        "ted enviada para",
+        "ted enviada",
+        "doc recebido de",
+        "doc recebido",
+        "doc enviado para",
+        "doc enviado",
+        "transferencia recebida de",
+        "transferencia recebida",
+        "transferencia enviada para",
+        "transferencia enviada",
+        "pagamento de boleto",
+        "pagamento efetuado",
+        "compra no debito",
+        "compra no credito",
+    )
+
+    # Sufixos societários — o mesmo fornecedor pode aparecer cadastrado
+    # como "Fulano Comercio Ltda" e no extrato só como "FULANO COMERCIO",
+    # ou vice-versa.
+    _SUFIXOS_SOCIETARIOS = (
+        " ltda me",
+        " eireli me",
+        " ltda",
+        " eireli",
+        " mei",
+        " s a",
+        " sa",
+        " me",
+    )
+
     @staticmethod
     def _normalizar_texto(texto):
-        """Minúsculas e sem números — números de documento/referência
-        variam a cada lançamento do mesmo fornecedor recorrente, e
-        atrapalhariam a comparação de similaridade do nome/descrição em
-        si (ex.: "TED FULANO LTDA 001234" vs "TED FULANO LTDA 009876")."""
+        """Minúsculas, sem acento, sem pontuação e sem números — números
+        de documento/referência variam a cada lançamento do mesmo
+        fornecedor recorrente, e atrapalhariam a comparação de
+        similaridade do nome/descrição em si (ex.: "TED FULANO LTDA
+        001234" vs "TED FULANO LTDA 009876"). Também tira prefixos de
+        extrato bancário ("PIX RECEBIDO DE") e sufixos societários
+        ("LTDA", "ME") que são ruído pra comparar o nome do fornecedor
+        em si."""
 
-        texto = (texto or "").lower()
+        texto = (texto or "").strip()
+
+        # Remove acentos (NFKD separa a letra do acento, depois
+        # descartamos só os caracteres de acentuação combinante).
+        texto = unicodedata.normalize("NFKD", texto)
+        texto = "".join(
+            c for c in texto if not unicodedata.combining(c)
+        )
+
+        texto = texto.lower()
 
         texto = re.sub(r"\d+", "", texto)
 
+        # Pontuação/símbolos viram espaço (não some, pra não colar duas
+        # palavras: "TED/DOC" -> "ted doc", não "teddoc").
+        texto = re.sub(r"[^a-z\s]", " ", texto)
+
         texto = re.sub(r"\s+", " ", texto).strip()
+
+        for prefixo in (
+            BankReconciliationService._PREFIXOS_BANCARIOS
+        ):
+            if texto.startswith(prefixo):
+                texto = texto[len(prefixo):].strip()
+                break
+
+        for sufixo in (
+            BankReconciliationService._SUFIXOS_SOCIETARIOS
+        ):
+            if texto.endswith(sufixo):
+                texto = texto[:-len(sufixo)].strip()
+                break
 
         return texto
 
@@ -194,6 +283,90 @@ class BankReconciliationService:
         )
 
     @staticmethod
+    def _sugerir_contato_por_nome(
+        db,
+        current_user,
+        transaction
+    ):
+        """Último recurso, quando nem um lançamento candidato (por valor
+        e data) nem o histórico de lançamentos parecidos encontrou nada
+        — o que acontece sempre que o fornecedor é novo (cadastrado
+        formalmente ou digitado na hora, na tela de Conciliação, ambos
+        viram uma linha real em FinancialContact) e ainda não tem nenhum
+        lançamento anterior pra comparar. Aqui comparamos a descrição da
+        transação direto com o NOME de cada fornecedor já cadastrado
+        desse cliente — sem depender de já ter histórico nenhum. Só
+        sugere o contato pra pré-preencher o formulário; categoria e
+        subcategoria ficam em branco."""
+
+        contatos = (
+            db.query(FinancialContact)
+            .filter(
+                FinancialContact.tenant_id
+                == current_user.tenant_id,
+
+                FinancialContact.client_id
+                == transaction.client_id,
+
+                FinancialContact.ativo
+                == True,  # noqa: E712
+            )
+            .all()
+        )
+
+        melhor_contato = None
+        melhor_similaridade = 0.0
+
+        for contato in contatos:
+
+            similaridade = (
+                BankReconciliationService
+                ._similaridade_descricao(
+                    transaction.descricao,
+                    contato.nome
+                )
+            )
+
+            if similaridade > melhor_similaridade:
+                melhor_similaridade = similaridade
+                melhor_contato = contato
+
+        if (
+            melhor_contato
+            and melhor_similaridade
+            >= BankReconciliationService.SIMILARIDADE_MINIMA
+        ):
+            return melhor_contato.id
+
+        return None
+
+    @staticmethod
+    def _dentro_tolerancia_valor(diferenca, valor_base):
+        """Aceita uma divergência de valor tanto pelo piso fixo
+        (TOLERANCIA, arredondamento de centavos) quanto pela tolerância
+        percentual (TOLERANCIA_VALOR_PERCENTUAL, 5% do valor do
+        lançamento) — a mesma usada em get_suggestions pra sugerir
+        candidatos com valor aproximado. Sem isso, um match PROXIMO ou
+        PARECIDO com valor um pouco diferente (ex.: boleto pago com
+        desconto) seria sugerido na tela de Conciliação e depois
+        rejeitado ao clicar em "Conciliar"."""
+
+        valor_base = Decimal(str(valor_base))
+
+        tolerancia_percentual = (
+            valor_base
+            * BankReconciliationService
+            .TOLERANCIA_VALOR_PERCENTUAL
+        )
+
+        limite = max(
+            BankReconciliationService.TOLERANCIA,
+            tolerancia_percentual,
+        )
+
+        return diferenca <= limite
+
+    @staticmethod
     def create_reconciliation(
         db,
         current_user,
@@ -290,7 +463,13 @@ class BankReconciliationService:
                 - Decimal(str(payable.valor))
             )
 
-            if diferenca_titulo > BankReconciliationService.TOLERANCIA:
+            if not (
+                BankReconciliationService
+                ._dentro_tolerancia_valor(
+                    diferenca_titulo,
+                    payable.valor
+                )
+            ):
                 raise HTTPException(
                     status_code=400,
                     detail=(
@@ -339,7 +518,13 @@ class BankReconciliationService:
                 - Decimal(str(receivable.valor))
             )
 
-            if diferenca_titulo > BankReconciliationService.TOLERANCIA:
+            if not (
+                BankReconciliationService
+                ._dentro_tolerancia_valor(
+                    diferenca_titulo,
+                    receivable.valor
+                )
+            ):
                 raise HTTPException(
                     status_code=400,
                     detail=(
@@ -538,15 +723,25 @@ class BankReconciliationService:
         """Para cada transação bancária ainda não conciliada (e não
         ignorada/processada), procura um lançamento já existente — conta
         a pagar ou a receber, ainda não vinculado a nenhuma conciliação —
-        que pareça corresponder a ela: mesmo cliente, mesmo valor, e
-        vencimento igual (EXATO), próximo até 5 dias (PROXIMO) ou, se
-        nada bater por data, descrição parecida o bastante com a de um
-        lançamento já existente do mesmo cliente/tipo (PARECIDO) — ex.:
-        mesmo fornecedor recorrente, mas o vencimento cadastrado ficou
-        longe da data real do débito. Quando não há candidato nenhum pra
-        vincular, ainda sugerimos o contato/categoria mais usados em
-        lançamentos com descrição parecida, só pra pré-preencher o
-        formulário de "Criar lançamento" — nunca pra vincular sozinho.
+        que pareça corresponder a ela: mesmo cliente, valor igual ou
+        dentro de 5% de diferença, e:
+          - vencimento igual → EXATO ("Encontramos")
+          - valor exato e vencimento até 5 dias de distância, OU valor
+            aproximado (dentro dos 5%) no mesmo dia com a descrição
+            batendo → PROXIMO ("Quase lá")
+          - valor exato com descrição parecida (mesmo fora da janela de
+            5 dias), OU valor aproximado com descrição parecida (mesmo
+            fora do mesmo dia) → PARECIDO
+        Valor só aproximado SEM a descrição bater nunca vira sugestão —
+        evita coincidência de dois lançamentos com valor parecido por
+        acaso. Quando não há candidato nenhum pra vincular, ainda
+        sugerimos contato/categoria pra pré-preencher o formulário de
+        "Criar lançamento" (nunca pra vincular sozinho): primeiro pelo
+        contato/categoria mais usados em lançamentos antigos com
+        descrição parecida; se não achar nada (fornecedor novo, sem
+        histórico ainda — cadastrado formalmente ou só digitado na tela
+        de Conciliação), comparamos a descrição direto com o nome dos
+        fornecedores já cadastrados desse cliente.
 
         É a base da tela de Conciliação no estilo Conta Azul: em vez de
         só listar a transação e pedir pra preencher tudo de novo, já
@@ -627,11 +822,24 @@ class BankReconciliationService:
                 else payable_ids_vinculados
             )
 
-            # Mesmo valor é sempre exigido (não implementamos valor
-            # aproximado — o risco de sugerir o lançamento errado não
-            # compensa); o que muda agora é que vencimento distante não
-            # descarta mais o candidato de cara, só rebaixa a confiança
-            # se a descrição ainda assim for parecida o bastante.
+            # Valor exatamente igual continua sendo o melhor caso, mas
+            # agora também aceitamos candidatos com valor dentro de 5%
+            # (TOLERANCIA_VALOR_PERCENTUAL) — cobre juros/desconto de
+            # boleto, taxa de cartão descontada etc. Buscamos já num
+            # intervalo pra não escanear lançamentos com valor muito
+            # diferente à toa; o filtro fino (exigir descrição parecida
+            # quando o valor não é exato) acontece no loop abaixo.
+            valor_transacao = Decimal(str(transaction.valor))
+
+            tolerancia_valor = (
+                valor_transacao
+                * BankReconciliationService
+                .TOLERANCIA_VALOR_PERCENTUAL
+            )
+
+            valor_minimo = valor_transacao - tolerancia_valor
+            valor_maximo = valor_transacao + tolerancia_valor
+
             candidatos = (
                 db.query(Model)
                 .filter(
@@ -642,7 +850,10 @@ class BankReconciliationService:
                     == transaction.client_id,
 
                     Model.valor
-                    == transaction.valor,
+                    >= valor_minimo,
+
+                    Model.valor
+                    <= valor_maximo,
                 )
                 .all()
             )
@@ -654,6 +865,16 @@ class BankReconciliationService:
                 if item.id in ids_vinculados:
                     continue
 
+                valor_exato = (
+                    Decimal(str(item.valor))
+                    == valor_transacao
+                )
+
+                diferenca_valor = abs(
+                    Decimal(str(item.valor))
+                    - valor_transacao
+                )
+
                 dias = abs(
                     (
                         item.vencimento
@@ -661,38 +882,61 @@ class BankReconciliationService:
                     ).days
                 )
 
-                if dias == 0:
+                similaridade = (
+                    BankReconciliationService
+                    ._similaridade_descricao(
+                        transaction.descricao,
+                        item.descricao
+                    )
+                )
+
+                descricao_bate = (
+                    similaridade
+                    >= BankReconciliationService
+                    .SIMILARIDADE_MINIMA
+                )
+
+                # Valor só aproximado (não exato) sem a descrição bater
+                # é coincidência demais pra virar sugestão — dois
+                # lançamentos de fornecedores diferentes podem ter
+                # valores parecidos por acaso.
+                if not valor_exato and not descricao_bate:
+                    continue
+
+                if valor_exato and dias == 0:
                     confianca = "EXATO"
 
                 elif (
-                    dias
+                    valor_exato
+                    and dias
                     <= BankReconciliationService
                     .TOLERANCIA_DIAS_SUGESTAO
                 ):
                     confianca = "PROXIMO"
 
-                else:
+                elif (
+                    not valor_exato
+                    and dias == 0
+                    and descricao_bate
+                ):
+                    # Mesmo dia e descrição bate — só o valor variou um
+                    # pouco (juros, desconto, taxa): quase tão confiável
+                    # quanto EXATO.
+                    confianca = "PROXIMO"
 
-                    similaridade = (
-                        BankReconciliationService
-                        ._similaridade_descricao(
-                            transaction.descricao,
-                            item.descricao
-                        )
-                    )
-
-                    if (
-                        similaridade
-                        < BankReconciliationService
-                        .SIMILARIDADE_MINIMA
-                    ):
-                        continue
-
+                elif descricao_bate:
                     confianca = "PARECIDO"
 
-                avaliados.append(
-                    (item, dias, confianca)
-                )
+                else:
+                    continue
+
+                avaliados.append((
+                    item,
+                    dias,
+                    confianca,
+                    diferenca_valor,
+                    similaridade,
+                ))
 
             if avaliados:
 
@@ -702,13 +946,21 @@ class BankReconciliationService:
                     "PARECIDO": 2,
                 }
 
-                melhor, _, confianca = min(
+                (
+                    melhor,
+                    _dias_melhor,
+                    confianca,
+                    _diferenca_valor_melhor,
+                    _similaridade_melhor,
+                ) = min(
                     avaliados,
                     key=lambda avaliado: (
                         ordem_confianca[
                             avaliado[2]
                         ],
-                        avaliado[1],
+                        avaliado[3],  # diferença de valor
+                        avaliado[1],  # dias
+                        -avaliado[4],  # similaridade (maior é melhor)
                     )
                 )
 
@@ -746,6 +998,17 @@ class BankReconciliationService:
                         Model
                     )
                 )
+
+                if not sugestao_contato:
+
+                    sugestao_contato = (
+                        BankReconciliationService
+                        ._sugerir_contato_por_nome(
+                            db,
+                            current_user,
+                            transaction
+                        )
+                    )
 
             results.append({
                 "transaction_id": transaction.id,
