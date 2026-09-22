@@ -3,8 +3,14 @@
 # emitido o certificado (senão o nginx nem sobe, por falta do arquivo de
 # certificado).
 #
-# Pra ativar: copie este conteúdo por cima de nginx/conf.d/app.conf e rode
+# Este arquivo é mantido só como referência/documentação do PASSO 2 — o
+# config realmente ativo em produção é nginx/conf.d/app.conf, que já tem
+# esse mesmo conteúdo. Pra reaplicar manualmente: copie este conteúdo por
+# cima de nginx/conf.d/app.conf e rode
 #   docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+#
+# O PASSO 1 (bootstrap, só HTTP, usado pra emitir o primeiro certificado
+# num domínio novo) fica em nginx/templates/app.conf.bootstrap-http.
 
 server {
     listen 80;

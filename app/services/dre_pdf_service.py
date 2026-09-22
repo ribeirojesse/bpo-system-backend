@@ -135,20 +135,6 @@ class DrePdfService:
 
         elementos.append(Spacer(1, 22))
 
-        if dados.get("saldos_contas"):
-
-            elementos.append(
-                Paragraph("Saldo em Contas Bancárias", secao_style)
-            )
-
-            elementos.append(
-                DrePdfService._tabela_saldos(
-                    dados["saldos_contas"], largura, cor_destaque
-                )
-            )
-
-            elementos.append(Spacer(1, 22))
-
         elementos.append(Paragraph("Receitas", secao_style))
 
         elementos.append(
@@ -238,32 +224,6 @@ class DrePdfService:
         ]))
 
         return tabela
-
-    @staticmethod
-    def _tabela_saldos(saldos_contas, largura, cor_destaque):
-
-        linhas = [["Banco", "Conta", "Saldo"]]
-
-        total = 0
-
-        for item in saldos_contas:
-
-            linhas.append([
-                item["banco"],
-                item["conta"],
-                brl(item["saldo"]),
-            ])
-
-            total += float(item["saldo"] or 0)
-
-        linhas.append(["", "Total", brl(total)])
-
-        return DrePdfService._tabela(
-            linhas,
-            [largura * 0.4, largura * 0.4, largura * 0.2],
-            cor_destaque=cor_destaque,
-            destacar_ultima_linha=True,
-        )
 
     @staticmethod
     def _tabela_linhas(linhas, meses, largura, cor_destaque):

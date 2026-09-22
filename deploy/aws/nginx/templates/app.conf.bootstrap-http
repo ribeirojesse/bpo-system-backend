@@ -1,0 +1,37 @@
+# PASSO 1 (bootstrap) — só HTTP. Usado só pra conseguir emitir o primeiro
+# certificado com o Certbot (ele precisa responder num "http://" válido pro
+# domínio). O site já funciona por HTTP nesse meio-tempo.
+#
+# Pra usar (ex.: configurando um domínio novo do zero): copie este conteúdo
+# por cima de nginx/conf.d/app.conf e rode
+#   docker compose -f docker-compose.prod.yml exec nginx nginx -s reload
+#
+# Depois de rodar o Certbot com sucesso (seção 9 do DEPLOY.md), troque o
+# CONTEÚDO de nginx/conf.d/app.conf pelo de nginx/templates/app.conf.https
+# e recarregue o nginx de novo. Esse é o estado atual de produção — ver
+# nginx/conf.d/app.conf, que já está com o conteúdo do PASSO 2.
+
+server {
+    listen 80;
+    server_name api.towerbpo.com;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        proxy_pass http://api:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+
+# Qualquer outro Host (o IP direto, domínios ainda não configurados) não
+# recebe resposta — evita bots/scanners batendo direto no IP público.
+server {
+    listen 80 default_server;
+    server_name _;
+    return 444;
+}

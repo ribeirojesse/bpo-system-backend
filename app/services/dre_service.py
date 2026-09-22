@@ -1,7 +1,5 @@
 from collections import defaultdict
 
-from datetime import date
-
 from decimal import Decimal
 
 from fastapi import HTTPException
@@ -480,40 +478,6 @@ class DreService:
             totais_receita[m] - totais_despesa[m] for m in range(12)
         ]
 
-        saldos_contas = []
-
-        if params.incluir_saldo_contas:
-
-            contas_cliente = db.query(BankAccount).filter(
-                BankAccount.client_id == client_id
-            ).all()
-
-            fim_ano = date(params.ano, 12, 31)
-
-            for conta in contas_cliente:
-
-                ultima = (
-                    db.query(BankTransaction)
-                    .filter(
-                        BankTransaction.bank_account_id == conta.id,
-                        BankTransaction.data_transacao <= fim_ano,
-                    )
-                    .order_by(BankTransaction.data_transacao.desc())
-                    .first()
-                )
-
-                saldo = (
-                    ultima.saldo
-                    if ultima and ultima.saldo is not None
-                    else conta.saldo_inicial
-                )
-
-                saldos_contas.append({
-                    "banco": conta.banco,
-                    "conta": conta.conta,
-                    "saldo": saldo,
-                })
-
         return {
             "cliente_nome": client.nome_fantasia or client.razao_social,
             "ano": params.ano,
@@ -527,6 +491,5 @@ class DreService:
             "receita_anual": sum(totais_receita),
             "despesa_anual": sum(totais_despesa),
             "resultado_anual": sum(totais_resultado),
-            "saldos_contas": saldos_contas,
             "cor_destaque": template.cor_destaque if template else None,
         }

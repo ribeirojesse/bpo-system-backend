@@ -108,8 +108,6 @@ class DreGerarRequestSchema(BaseModel):
     # agrupamento nos modos BANCO/BANCO_CATEGORIA.
     bank_account_id: Optional[uuid.UUID] = None
 
-    incluir_saldo_contas: bool = True
-
 
 class DreLinhaSchema(BaseModel):
 
@@ -126,15 +124,6 @@ class DreLinhaSchema(BaseModel):
     # subcategoria definida — o frontend decide se exibe ou não (ver
     # DreTemplateEditorModal/ReportsPage, toggle "Mostrar subcategorias").
     subcategorias: list["DreLinhaSchema"] = []
-
-
-class DreSaldoContaSchema(BaseModel):
-
-    banco: str
-
-    conta: str
-
-    saldo: Decimal
 
 
 class DreResultadoSchema(BaseModel):
@@ -162,7 +151,5 @@ class DreResultadoSchema(BaseModel):
     despesa_anual: Decimal
 
     resultado_anual: Decimal
-
-    saldos_contas: list[DreSaldoContaSchema] = []
 
     cor_destaque: Optional[str] = None
