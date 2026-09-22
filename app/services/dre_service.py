@@ -152,7 +152,20 @@ class DreService:
             db, current_user, template_id
         )
 
-        payload = data.model_dump(exclude_unset=True)
+        # mode="json" é essencial aqui: "blocos" tem category_ids
+        # tipado como uuid.UUID no schema, e sem mode="json" o dump do
+        # Pydantic mantém esses valores como objetos UUID de verdade
+        # (não string). O destino (config, coluna JSONB) precisa de
+        # tipos serializáveis em JSON puro — sem essa conversão, o
+        # commit falhava com "Object of type UUID is not JSON
+        # serializable", sem nenhum handler pra capturar, e virava um
+        # 500 cru pro navegador. create_template já fazia essa mesma
+        # conversão por bloco (bloco.model_dump(mode="json")); aqui
+        # faltava.
+        payload = data.model_dump(
+            exclude_unset=True,
+            mode="json"
+        )
 
         if "blocos" in payload:
             blocos = payload.pop("blocos")
