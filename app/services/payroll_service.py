@@ -7,7 +7,12 @@ from app.models.payroll_item import PayrollItem
 from app.models.accounts_payable import AccountsPayable
 from app.models.financial_contact import FinancialContact
 
+from app.repositories.expense_category_repository import (
+    ExpenseCategoryRepository
+)
+
 from app.services.payroll_pdf_service import (
+    PayrollExtractionError,
     PayrollPDFService
 )
 
@@ -17,18 +22,7 @@ class PayrollService:
     TOLERANCIA = Decimal("1.00")
 
     @staticmethod
-    def processar_pdf(
-        db,
-        current_user,
-        transaction,
-        caminho_pdf,
-        competencia,
-        category_id
-    ):
-
-        # ==========================================
-        # VALIDA TIPO
-        # ==========================================
+    def _validar_transacao(db, transaction):
 
         if transaction.tipo != "DEBITO":
 
@@ -40,9 +34,15 @@ class PayrollService:
                 )
             )
 
-        # ==========================================
-        # BLOQUEIA DUPLICIDADE
-        # ==========================================
+        if transaction.conciliado or transaction.processado:
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Essa transação já foi conciliada "
+                    "ou processada"
+                )
+            )
 
         batch_existente = (
             db.query(PayrollBatch)
@@ -62,22 +62,130 @@ class PayrollService:
                 )
             )
 
-        # ==========================================
-        # EXTRAI PDF
-        # ==========================================
+    @staticmethod
+    def _extrair(conteudo, media_type, valor_esperado=None):
 
-        texto = (
-            PayrollPDFService.extrair_texto(
-                caminho_pdf
+        try:
+            return PayrollPDFService.extrair(
+                conteudo,
+                media_type,
+                valor_esperado
             )
+        except PayrollExtractionError as exc:
+            raise HTTPException(
+                status_code=400,
+                detail=str(exc)
+            ) from exc
+
+    @staticmethod
+    def pre_visualizar(
+        db,
+        current_user,
+        transaction,
+        conteudo,
+        media_type
+    ):
+        """Lê o comprovante e devolve a lista de funcionários extraída,
+        SEM gravar nada — a tela mostra a lista pra conferência/edição e
+        só depois chama processar_pdf com a lista confirmada. Assim uma
+        leitura errada (layout novo de banco, PDF ruim) nunca vira
+        lançamento sem alguém ter olhado antes."""
+
+        PayrollService._validar_transacao(db, transaction)
+
+        extracao = PayrollService._extrair(
+            conteudo,
+            media_type,
+            transaction.valor
         )
 
-        funcionarios = (
-            PayrollPDFService
-            .extrair_funcionarios(
-                texto
-            )
+        valor_total = sum(
+            (f["valor"] for f in extracao["funcionarios"]),
+            Decimal("0.00")
         )
+
+        valor_transacao = Decimal(str(transaction.valor))
+
+        diferenca = abs(valor_transacao - valor_total)
+
+        return {
+            "metodo": extracao["metodo"],
+            "funcionarios": [
+                {
+                    "funcionario": f["funcionario"],
+                    "cpf": f["cpf"],
+                    "valor": float(f["valor"]),
+                }
+                for f in extracao["funcionarios"]
+            ],
+            "valor_total": float(valor_total),
+            "valor_transacao": float(valor_transacao),
+            "diferenca": float(diferenca),
+            "dentro_tolerancia": (
+                diferenca <= PayrollService.TOLERANCIA
+            ),
+            "valor_total_documento": (
+                float(extracao["valor_total_documento"])
+                if extracao["valor_total_documento"] is not None
+                else None
+            ),
+            "competencia_detectada": extracao["competencia_detectada"],
+            "banco": extracao["banco"],
+            "avisos": extracao["avisos"],
+        }
+
+    @staticmethod
+    def processar_pdf(
+        db,
+        current_user,
+        transaction,
+        conteudo,
+        media_type,
+        competencia,
+        category_id,
+        funcionarios_confirmados=None
+    ):
+        """Grava a folha. Se `funcionarios_confirmados` vier (lista
+        conferida/editada na tela depois da pré-visualização), usa ela e
+        não lê o arquivo de novo; senão, extrai do arquivo (fluxo antigo,
+        mantido por compatibilidade)."""
+
+        PayrollService._validar_transacao(db, transaction)
+
+        category = ExpenseCategoryRepository.get_by_id(
+            db,
+            current_user.tenant_id,
+            category_id
+        )
+
+        if (
+            not category
+            or category.client_id != transaction.client_id
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Categoria inválida para este cliente"
+            )
+
+        # ==========================================
+        # FUNCIONÁRIOS
+        # ==========================================
+
+        if funcionarios_confirmados is not None:
+
+            funcionarios, _avisos = (
+                PayrollPDFService.limpar_funcionarios(
+                    funcionarios_confirmados
+                )
+            )
+
+        else:
+
+            funcionarios = PayrollService._extrair(
+                conteudo,
+                media_type,
+                transaction.valor
+            )["funcionarios"]
 
         if not funcionarios:
 
@@ -93,13 +201,9 @@ class PayrollService:
         # TOTAL PDF
         # ==========================================
 
-        valor_total = Decimal(
-            str(
-                sum(
-                    f["valor"]
-                    for f in funcionarios
-                )
-            )
+        valor_total = sum(
+            (f["valor"] for f in funcionarios),
+            Decimal("0.00")
         )
 
         valor_transacao = Decimal(
@@ -203,9 +307,7 @@ class PayrollService:
 
         for funcionario in funcionarios:
 
-            valor_funcionario = Decimal(
-                str(funcionario["valor"])
-            )
+            valor_funcionario = funcionario["valor"]
 
             payable = AccountsPayable(
                 tenant_id=current_user.tenant_id,
@@ -244,6 +346,8 @@ class PayrollService:
 
                 funcionario=
                 funcionario["funcionario"],
+
+                cpf=funcionario.get("cpf"),
 
                 valor=valor_funcionario,
 

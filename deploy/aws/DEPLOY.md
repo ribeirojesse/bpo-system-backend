@@ -412,10 +412,15 @@ verdade":
 
 ### 9.6 Reimplantar backend + frontend depois dessas mudanças
 
+*(Registro histórico de quando `~/app` ainda não era um clone git — a
+partir de 2026-09-22 o backend na EC2 passou a ser atualizado via
+`git pull`, ver seção 12. Os passos abaixo com `scp` não se aplicam mais,
+mantidos só como referência de quais arquivos mudaram naquele momento.)*
+
 Backend — os arquivos que mudaram (`main.py`, `core/config.py`,
 `dependencies/auth.py`, `api/endpoints/auth.py`) precisam ir pra EC2.
-Como `~/app` lá não é um clone git (ver conversa sobre isso), reenvie
-por `scp` mesmo:
+Como `~/app` lá não era um clone git nessa época, foram reenviados
+por `scp`:
 
 ```bash
 scp D:/00_DEV/00_Projetos/bpo-system/backend/app/main.py ec2-user@18.228.230.92:~/app/app/
@@ -472,12 +477,38 @@ E conecte seu cliente em `localhost:5433`.
 
 ## 12. Atualizar a aplicação depois de mudanças no código
 
+Desde 2026-09-22, `~/app` na EC2 é um clone git de
+`github.com/ribeirojesse/bpo-system-backend` (autenticado via deploy key
+SSH read-only em `~/.ssh/deploy_key`, configurada em `~/.ssh/config`).
+Atualizar é só:
+
 ```bash
-# reenvie o código atualizado (scp ou git pull), depois:
 cd ~/app
+git pull
 docker compose -f docker-compose.prod.yml up -d --build
 docker compose -f docker-compose.prod.yml exec api alembic upgrade head   # se houver migration nova
 ```
+
+**Atenção:** `git pull` atualiza o código da aplicação (`app/`, `alembic/`,
+`Dockerfile` etc.), mas **não** atualiza sozinho os arquivos que foram
+copiados manualmente pra raiz de `~/app` na primeira vez
+(`docker-compose.prod.yml` e a pasta `nginx/`, originados de
+`deploy/aws/docker-compose.prod.yml` e `deploy/aws/nginx/` — ver seção
+3). Se algum dia esses arquivos mudarem no repo, é preciso copiá-los de
+novo por cima manualmente:
+
+```bash
+cd ~/app
+cp deploy/aws/docker-compose.prod.yml .
+cp deploy/aws/nginx/conf.d/app.conf nginx/conf.d/
+cp deploy/aws/nginx/templates/app.conf.https nginx/templates/
+docker compose -f docker-compose.prod.yml up -d --build
+```
+
+Se a `.env` deu problema (git nunca mexe nela, fica de fora do repo via
+`.gitignore`) ou se `~/app` precisar ser recriado do zero, tem um backup
+em `~/env.backup.<data>` e a pasta antiga (pré-git) guardada em
+`~/app.scp-backup-<data>`.
 
 ## 13. Desligar tudo (evitar qualquer cobrança)
 
@@ -490,6 +521,45 @@ Confirme com `yes`. Isso apaga EC2, RDS, security groups e o S3 (o bucket
 só é removido se estiver vazio — se tiver backups, esvazie antes com `aws
 s3 rm s3://<bucket> --recursive` ou remova o bucket manualmente no
 console).
+
+## 14. Ativar a IA (API do Claude) — quando tiver a chave
+
+O sistema já vem com a IA pronta, mas **desligada**: sem
+`ANTHROPIC_API_KEY` no `.env`, nada é enviado pra fora, o botão "Sugerir
+com IA" não aparece na Conciliação e a folha usa só a leitura automática
+local (PDF). Pra ligar:
+
+1. Crie a chave em https://console.anthropic.com (API Keys) e, em
+   Billing/Limits, defina um **limite mensal de gasto**.
+2. Na EC2 (e no `.env` local, se quiser testar em dev), adicione:
+   ```
+   ANTHROPIC_API_KEY=sk-ant-...
+   ```
+   Nunca commite a chave. Opcionais (já têm padrão em
+   `app/core/config.py`): `AI_MODEL_CONCILIACAO`, `AI_MODEL_DOCUMENTOS`,
+   `AI_TIMEOUT_SECONDS`.
+3. Reinicie a API pra ler o `.env` novo:
+   ```bash
+   cd ~/app
+   docker compose -f docker-compose.prod.yml up -d --force-recreate api
+   ```
+4. Confira: na tela da Conciliação aparece o botão "Sugerir com IA", e na
+   Conciliação de Folha o upload passa a aceitar foto/print.
+
+O que muda com a IA ligada:
+- **Conciliação:** botão "Sugerir com IA" sugere lançamento/fornecedor/
+  categoria/competência pras transações que a heurística não resolveu.
+  Nada é conciliado sozinho.
+- **Folha:** a leitura local continua sendo tentada primeiro; a IA só é
+  chamada quando a soma lida não bate com o extrato (layout desconhecido,
+  PDF escaneado, foto). Nesse caso o comprovante inteiro (com CPFs) vai
+  pra Anthropic — considerar isso no contrato com os clientes (LGPD).
+
+Pra desligar de novo: apague a linha do `.env` e repita o passo 3.
+
+A tabela `ai_reconciliation_suggestions` é criada pelo `alembic upgrade
+head` normal (seção 12), mesmo com a IA desligada — fica vazia até a IA
+ser usada.
 
 ## Referência rápida de custos (dentro dos limites deste setup)
 

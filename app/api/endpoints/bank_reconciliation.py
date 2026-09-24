@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import (
     APIRouter,
     Depends
@@ -17,11 +19,18 @@ from app.schemas.bank_reconciliation import (
     BankReconciliationCreateSchema,
     BankReconciliationFromTransactionSchema,
     BankReconciliationResponseSchema,
-    ReconciliationSuggestionSchema
+    ReconciliationSuggestionSchema,
+    AISuggestionListSchema,
+    AISuggestionGenerateSchema,
+    AISuggestionGenerateResponseSchema
 )
 
 from app.services.bank_reconciliation_service import (
     BankReconciliationService
+)
+
+from app.services.ai_reconciliation_service import (
+    AIReconciliationService
 )
 
 
@@ -120,6 +129,65 @@ def get_suggestions(
             db,
             current_user
         )
+    )
+
+
+# ----------------------------------------------------------------------
+# Sugestões com IA. Também precisam vir antes de '/{reconciliation_id}'.
+# ----------------------------------------------------------------------
+
+@router.get(
+    "/ai-suggestions",
+    response_model=AISuggestionListSchema
+)
+def get_ai_suggestions(
+    client_id: uuid.UUID | None = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN"))
+):
+    """Sugestões da IA já geradas para as transações pendentes do
+    cliente (não chama a IA — só lê o que está guardado)."""
+
+    return AIReconciliationService.listar(
+        db,
+        current_user,
+        client_id
+    )
+
+
+@router.post(
+    "/ai-suggestions",
+    response_model=AISuggestionGenerateResponseSchema
+)
+def generate_ai_suggestions(
+    data: AISuggestionGenerateSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN"))
+):
+    """Pede à IA sugestões para até 20 transações pendentes por chamada
+    (o frontend repete enquanto 'restantes' > 0). Nada é conciliado:
+    só grava a sugestão pra aparecer na tela."""
+
+    return AIReconciliationService.gerar(
+        db,
+        current_user,
+        data.client_id,
+        data.transaction_ids,
+        data.forcar
+    )
+
+
+@router.delete("/ai-suggestions/{transaction_id}")
+def discard_ai_suggestion(
+    transaction_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN"))
+):
+
+    return AIReconciliationService.descartar(
+        db,
+        current_user,
+        transaction_id
     )
 
 

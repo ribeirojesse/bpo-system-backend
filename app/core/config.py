@@ -31,6 +31,27 @@ class Settings(BaseSettings):
     # domínio raiz = cookie tratado como "mesmo site" pelo navegador).
     COOKIE_DOMAIN: str = ""
 
+    # ------------------------------------------------------------------
+    # IA (API do Claude / Anthropic)
+    # ------------------------------------------------------------------
+    # Sem chave configurada, tudo que usa IA fica desligado e o sistema
+    # continua funcionando como antes (heurística de conciliação e leitura
+    # de PDF por regex). NUNCA commitar a chave — só no .env.
+    ANTHROPIC_API_KEY: str = ""
+
+    # Modelo usado pra sugerir conciliações (tarefa de texto curta, muitas
+    # chamadas): o Haiku é rápido e barato e dá conta.
+    AI_MODEL_CONCILIACAO: str = "claude-haiku-4-5-20251001"
+
+    # Modelo usado pra ler documentos (PDF/imagem de folha de pagamento).
+    # Leitura de tabela em layout variável de banco pra banco se beneficia
+    # de um modelo mais forte; são poucas chamadas por mês.
+    AI_MODEL_DOCUMENTOS: str = "claude-sonnet-5"
+
+    # Tempo máximo de espera por resposta da API (segundos). Fica abaixo
+    # do proxy_read_timeout padrão do nginx (60s).
+    AI_TIMEOUT_SECONDS: int = 50
+
     class Config:
         env_file = ".env"
 

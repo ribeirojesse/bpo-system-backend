@@ -23,6 +23,7 @@ from app.models.bank_transaction import BankTransaction
 from app.models.bank_reconciliation import BankReconciliation
 from app.models.payroll_item import PayrollItem
 from app.models.payroll_batch import PayrollBatch
+from app.models.ai_reconciliation_suggestion import AIReconciliationSuggestion
 
 
 config = context.config

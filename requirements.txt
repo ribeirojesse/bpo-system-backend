@@ -26,3 +26,5 @@ python-multipart
 email-validator
 
 uuid6
+
+anthropic
