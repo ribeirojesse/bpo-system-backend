@@ -20,12 +20,15 @@ from app.schemas.dre import (
     DreTemplateUpdateSchema,
     DreTemplateResponseSchema,
     DreGerarRequestSchema,
+    LancamentosExcelRequestSchema,
     DreResultadoSchema
 )
 
 from app.services.dre_service import DreService
 
 from app.services.dre_pdf_service import DrePdfService
+
+from app.services import dre_excel_service
 
 
 router = APIRouter()
@@ -139,5 +142,43 @@ def gerar_dre_pdf(
         headers={
             "Content-Disposition":
                 f'attachment; filename="{nome_arquivo}"'
+        }
+    )
+
+
+@router.post("/lancamentos/excel")
+def exportar_lancamentos_excel(
+    params: LancamentosExcelRequestSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN", "CLIENTE"))
+):
+    """Planilha .xlsx com os lançamentos pagos/recebidos do período
+    personalizado (único filtro), um por linha. ADMIN informa o cliente;
+    CLIENTE sempre recebe só os próprios lançamentos."""
+
+    dados = DreService.listar_lancamentos(
+        db,
+        current_user,
+        params.client_id,
+        params.data_inicio,
+        params.data_fim
+    )
+
+    conteudo = dre_excel_service.gerar(dados)
+
+    nome = dre_excel_service.nome_arquivo(
+        dados["cliente_nome"],
+        dados["data_inicio"],
+        dados["data_fim"]
+    )
+
+    return Response(
+        content=conteudo,
+        media_type=(
+            "application/vnd.openxmlformats-officedocument."
+            "spreadsheetml.sheet"
+        ),
+        headers={
+            "Content-Disposition": f'attachment; filename="{nome}"'
         }
     )

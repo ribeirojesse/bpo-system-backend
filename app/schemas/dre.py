@@ -2,6 +2,8 @@ import uuid
 
 from typing import Optional, Literal
 
+from datetime import date
+
 from decimal import Decimal
 
 from pydantic import BaseModel, ConfigDict
@@ -107,6 +109,18 @@ class DreGerarRequestSchema(BaseModel):
     # como recorte dentro do modo CATEGORIA quanto como parte do
     # agrupamento nos modos BANCO/BANCO_CATEGORIA.
     bank_account_id: Optional[uuid.UUID] = None
+
+
+class LancamentosExcelRequestSchema(BaseModel):
+    """Exportação dos lançamentos em Excel: o único filtro é o período
+    personalizado (data inicial e final, inclusive). client_id segue a
+    mesma regra do DRE — ignorado pro CLIENTE, obrigatório pro ADMIN."""
+
+    client_id: Optional[uuid.UUID] = None
+
+    data_inicio: date
+
+    data_fim: date
 
 
 class DreLinhaSchema(BaseModel):

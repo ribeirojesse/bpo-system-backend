@@ -4,6 +4,8 @@ from decimal import Decimal
 
 from fastapi import HTTPException
 
+from sqlalchemy import func
+
 from app.repositories.client_repository import ClientRepository
 
 from app.repositories.dre_template_repository import (
@@ -17,6 +19,7 @@ from app.models.expense_subcategory import ExpenseSubcategory
 from app.models.bank_account import BankAccount
 from app.models.bank_transaction import BankTransaction
 from app.models.bank_reconciliation import BankReconciliation
+from app.models.financial_contact import FinancialContact
 
 
 MESES = [
@@ -505,4 +508,197 @@ class DreService:
             "despesa_anual": sum(totais_despesa),
             "resultado_anual": sum(totais_resultado),
             "cor_destaque": template.cor_destaque if template else None,
+        }
+
+    # ------------------------------------------------------------
+    # LANÇAMENTOS (exportação em Excel)
+    # ------------------------------------------------------------
+
+    # Evita planilhas gigantes por engano (ex.: ano digitado errado).
+    PERIODO_MAXIMO_DIAS = 366 * 5
+
+    @staticmethod
+    def listar_lancamentos(
+        db,
+        current_user,
+        requested_client_id,
+        data_inicio,
+        data_fim
+    ):
+        """Lançamentos pagos (contas a pagar PAGAS) e recebidos (contas a
+        receber RECEBIDAS) com data efetiva — pagamento/recebimento, ou o
+        vencimento se não houver — dentro do período [data_inicio,
+        data_fim], um por linha e com todos os dados do lançamento. O
+        período é o único filtro (pedido do usuário).
+
+        Devolve {"cliente_nome", "data_inicio", "data_fim",
+        "lancamentos": [...]}."""
+
+        if data_fim < data_inicio:
+            raise HTTPException(
+                status_code=400,
+                detail="A data final precisa ser igual ou posterior à inicial"
+            )
+
+        if (
+            (data_fim - data_inicio).days
+            > DreService.PERIODO_MAXIMO_DIAS
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="Período muito longo (máximo de 5 anos)"
+            )
+
+        client_id = DreService._resolve_client_id(
+            current_user, requested_client_id
+        )
+
+        client = DreService._validar_cliente(
+            db, current_user, client_id
+        )
+
+        data_pag = func.coalesce(
+            AccountsPayable.data_pagamento,
+            AccountsPayable.vencimento
+        )
+
+        payables = (
+            db.query(AccountsPayable)
+            .filter(
+                AccountsPayable.tenant_id == current_user.tenant_id,
+                AccountsPayable.client_id == client_id,
+                AccountsPayable.status == "PAGO",
+                data_pag >= data_inicio,
+                data_pag <= data_fim,
+            )
+            .all()
+        )
+
+        data_rec = func.coalesce(
+            AccountsReceivable.data_recebimento,
+            AccountsReceivable.vencimento
+        )
+
+        receivables = (
+            db.query(AccountsReceivable)
+            .filter(
+                AccountsReceivable.tenant_id == current_user.tenant_id,
+                AccountsReceivable.client_id == client_id,
+                AccountsReceivable.status == "RECEBIDO",
+                data_rec >= data_inicio,
+                data_rec <= data_fim,
+            )
+            .all()
+        )
+
+        banco_por_payable = DreService._mapa_banco_por_lancamento(
+            db,
+            current_user.tenant_id,
+            [p.id for p in payables],
+            "accounts_payable_id",
+        )
+
+        banco_por_receivable = DreService._mapa_banco_por_lancamento(
+            db,
+            current_user.tenant_id,
+            [r.id for r in receivables],
+            "accounts_receivable_id",
+        )
+
+        itens = payables + receivables
+
+        # Nomes resolvidos de uma vez só (evita uma consulta por linha).
+        contato_ids = {i.financial_contact_id for i in itens}
+        categoria_ids = {i.category_id for i in itens}
+        subcategoria_ids = {
+            i.subcategory_id for i in itens if i.subcategory_id
+        }
+        conta_ids = (
+            set(banco_por_payable.values())
+            | set(banco_por_receivable.values())
+        )
+        conta_ids.discard(None)
+
+        contatos = {
+            c.id: c
+            for c in db.query(FinancialContact).filter(
+                FinancialContact.tenant_id == current_user.tenant_id,
+                FinancialContact.id.in_(contato_ids),
+            ).all()
+        } if contato_ids else {}
+
+        categorias = {
+            c.id: c.nome
+            for c in db.query(ExpenseCategory).filter(
+                ExpenseCategory.id.in_(categoria_ids)
+            ).all()
+        } if categoria_ids else {}
+
+        subcategorias = {
+            s.id: s.nome
+            for s in db.query(ExpenseSubcategory).filter(
+                ExpenseSubcategory.id.in_(subcategoria_ids)
+            ).all()
+        } if subcategoria_ids else {}
+
+        contas = {
+            c.id: (
+                f"{c.banco} • Ag {c.agencia} • CC {c.conta}"
+                if c.agencia
+                else f"{c.banco} • {c.conta}"
+            )
+            for c in db.query(BankAccount).filter(
+                BankAccount.id.in_(conta_ids)
+            ).all()
+        } if conta_ids else {}
+
+        lancamentos = []
+
+        def montar(item, tipo, campo_data, banco_id):
+
+            contato = contatos.get(item.financial_contact_id)
+
+            lancamentos.append({
+                "tipo": tipo,
+                "data": DreService._data_efetiva(item, campo_data),
+                "vencimento": item.vencimento,
+                "competencia": item.competencia,
+                "contato": contato.nome if contato else "",
+                "contato_documento": (
+                    contato.documento if contato else None
+                ),
+                "descricao": item.descricao,
+                "categoria": categorias.get(item.category_id, ""),
+                "subcategoria": subcategorias.get(item.subcategory_id),
+                "valor": item.valor,
+                "conta_bancaria": contas.get(banco_id),
+                "conciliado": banco_id is not None,
+                "observacao": item.observacao,
+            })
+
+        for p in payables:
+            montar(
+                p, "Despesa", "data_pagamento",
+                banco_por_payable.get(p.id)
+            )
+
+        for r in receivables:
+            montar(
+                r, "Receita", "data_recebimento",
+                banco_por_receivable.get(r.id)
+            )
+
+        lancamentos.sort(
+            key=lambda l: (
+                l["data"],
+                l["tipo"] != "Receita",
+                l["descricao"] or "",
+            )
+        )
+
+        return {
+            "cliente_nome": client.nome_fantasia or client.razao_social,
+            "data_inicio": data_inicio,
+            "data_fim": data_fim,
+            "lancamentos": lancamentos,
         }
