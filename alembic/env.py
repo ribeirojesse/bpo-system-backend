@@ -24,6 +24,8 @@ from app.models.bank_reconciliation import BankReconciliation
 from app.models.payroll_item import PayrollItem
 from app.models.payroll_batch import PayrollBatch
 from app.models.ai_reconciliation_suggestion import AIReconciliationSuggestion
+from app.models.push_device import PushDevice
+from app.models.notification import Notification
 
 
 config = context.config

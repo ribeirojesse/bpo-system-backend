@@ -2,6 +2,10 @@ import hashlib
 
 from fastapi import HTTPException
 
+from app.models.bank_reconciliation import BankReconciliation
+
+from app.models.payroll_batch import PayrollBatch
+
 from app.repositories.client_repository import (
     ClientRepository
 )
@@ -97,15 +101,51 @@ class BankTransactionService:
         db,
         current_user,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
+        client_id=None
     ):
 
         return BankTransactionRepository.get_all(
             db,
             current_user.tenant_id,
             skip,
-            limit
+            limit,
+            client_id
         )
+
+    @staticmethod
+    def motivo_bloqueio_exclusao(db, transaction):
+        """Por que essa transação NÃO pode ser apagada (ou None se pode).
+        Qualquer coisa que aponte pra ela no banco impediria o DELETE
+        (erro de FK) — melhor recusar com uma mensagem clara."""
+
+        if transaction.conciliado:
+            return (
+                "Já foi conciliada. Desfaça a conciliação "
+                "antes de excluir."
+            )
+
+        if transaction.processado:
+            return "Já foi processada via folha de pagamento."
+
+        tem_conciliacao = db.query(BankReconciliation.id).filter(
+            BankReconciliation.bank_transaction_id == transaction.id
+        ).first()
+
+        if tem_conciliacao:
+            return (
+                "Tem uma conciliação vinculada. Desfaça a "
+                "conciliação antes de excluir."
+            )
+
+        tem_folha = db.query(PayrollBatch.id).filter(
+            PayrollBatch.bank_transaction_id == transaction.id
+        ).first()
+
+        if tem_folha:
+            return "Tem um lote de folha de pagamento vinculado."
+
+        return None
 
     @staticmethod
     def get_transaction(
@@ -171,6 +211,17 @@ class BankTransactionService:
                 transaction_id
             )
         )
+
+        motivo = BankTransactionService.motivo_bloqueio_exclusao(
+            db,
+            transaction
+        )
+
+        if motivo:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Não é possível excluir: {motivo}"
+            )
 
         BankTransactionRepository.delete(
             db,
@@ -249,3 +300,79 @@ class BankTransactionService:
         db.refresh(transaction)
 
         return transaction
+
+
+    @staticmethod
+    def bulk_action(
+        db,
+        current_user,
+        ids,
+        acao
+    ):
+        """Excluir / ignorar / reabrir várias transações de uma vez.
+
+        Faz o que dá e devolve o resto em "recusadas" com o motivo (ex.:
+        uma já conciliada no meio da seleção não impede as outras). Tudo
+        numa transação só de banco: ou grava o lote inteiro, ou nada."""
+
+        transactions = BankTransactionRepository.get_many_by_ids(
+            db,
+            current_user.tenant_id,
+            ids
+        )
+
+        encontradas = {t.id for t in transactions}
+
+        recusadas = [
+            {"id": i, "descricao": None, "motivo": "Transação não encontrada"}
+            for i in ids
+            if i not in encontradas
+        ]
+
+        processadas = 0
+
+        for transaction in transactions:
+
+            if acao == "EXCLUIR":
+                motivo = BankTransactionService.motivo_bloqueio_exclusao(
+                    db,
+                    transaction
+                )
+
+            elif acao == "IGNORAR":
+                motivo = (
+                    "Já foi conciliada" if transaction.conciliado
+                    else "Já foi processada via folha de pagamento"
+                    if transaction.processado
+                    else None
+                )
+
+            else:
+                motivo = None
+
+            if motivo:
+                recusadas.append({
+                    "id": transaction.id,
+                    "descricao": transaction.descricao,
+                    "motivo": motivo,
+                })
+                continue
+
+            if acao == "EXCLUIR":
+                db.delete(transaction)
+
+            elif acao == "IGNORAR":
+                transaction.ignorada = True
+
+            else:
+                transaction.ignorada = False
+
+            processadas += 1
+
+        db.commit()
+
+        return {
+            "acao": acao,
+            "processadas": processadas,
+            "recusadas": recusadas,
+        }

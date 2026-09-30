@@ -26,10 +26,22 @@ def get_current_user(
         detail="Token inválido"
     )
 
-    # O access token agora vem num cookie httpOnly (não mais no header
-    # Authorization) — setado pelo /auth/login, inacessível a JavaScript
-    # no navegador (proteção contra roubo via XSS).
+    # Web: o access token vem num cookie httpOnly — setado pelo
+    # /auth/login, inacessível a JavaScript no navegador (proteção contra
+    # roubo via XSS).
+    #
+    # App mobile: não existe "navegador" guardando cookie, então o token
+    # (obtido em /auth/mobile/login e guardado no SecureStore/Keychain do
+    # aparelho) chega no header "Authorization: Bearer <token>". O cookie
+    # continua tendo prioridade, então nada muda pro frontend web.
     token = request.cookies.get("access_token")
+
+    if not token:
+
+        auth_header = request.headers.get("Authorization", "")
+
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
 
     if not token:
         raise credentials_exception

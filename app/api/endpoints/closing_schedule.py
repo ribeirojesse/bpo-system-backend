@@ -1,5 +1,6 @@
 from fastapi import (
     APIRouter,
+    BackgroundTasks,
     Depends
 )
 
@@ -22,6 +23,8 @@ from app.schemas.closing_schedule import (
 from app.services.closing_schedule_service import (
     ClosingScheduleService
 )
+
+from app.services.push_service import notify_client_background
 
 
 router = APIRouter()
@@ -91,16 +94,47 @@ def get_schedule(
 def update_schedule(
     schedule_id: str,
     data: ClosingScheduleUpdateSchema,
+    background_tasks: BackgroundTasks,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ):
 
-    return ClosingScheduleService.update_schedule(
+    status_anterior = ClosingScheduleService.get_schedule(
+        db,
+        current_user,
+        schedule_id
+    ).status
+
+    schedule = ClosingScheduleService.update_schedule(
         db,
         current_user,
         schedule_id,
         data
     )
+
+    # Push pro app mobile do cliente quando um fechamento ligado a ele
+    # passa pra CONCLUIDO (roda depois da resposta — não atrasa a tela).
+    if (
+        schedule.client_id
+        and schedule.status == "CONCLUIDO"
+        and status_anterior != "CONCLUIDO"
+    ):
+
+        competencia = (
+            f" de {schedule.competencia}" if schedule.competencia else ""
+        )
+
+        background_tasks.add_task(
+            notify_client_background,
+            schedule.client_id,
+            "Fechamento concluído ✅",
+            f"{schedule.titulo}{competencia} foi concluído. "
+            "Seus relatórios já estão atualizados no app.",
+            "FECHAMENTO_CONCLUIDO",
+            {"screen": "relatorios", "schedule_id": str(schedule.id)},
+        )
+
+    return schedule
 
 
 @router.delete("/{schedule_id}")

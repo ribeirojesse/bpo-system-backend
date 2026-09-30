@@ -1,6 +1,9 @@
+import uuid
+
 from fastapi import (
     APIRouter,
-    Depends
+    Depends,
+    Query
 )
 
 from sqlalchemy.orm import Session
@@ -16,7 +19,9 @@ from app.models.user import User
 from app.schemas.bank_transaction import (
     BankTransactionCreateSchema,
     BankTransactionUpdateSchema,
-    BankTransactionResponseSchema
+    BankTransactionResponseSchema,
+    BankTransactionBulkActionSchema,
+    BankTransactionBulkResultSchema
 )
 
 from app.services.bank_transaction_service import (
@@ -55,7 +60,10 @@ def create_transaction(
 )
 def get_transactions(
     skip: int = 0,
-    limit: int = 100,
+    # Padrão continua 100 (compatível), mas as telas pedem mais: com só
+    # 100 da carteira inteira, transações ficavam de fora da lista.
+    limit: int = Query(100, ge=1, le=20000),
+    client_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ):
@@ -64,7 +72,27 @@ def get_transactions(
         db,
         current_user,
         skip,
-        limit
+        limit,
+        client_id
+    )
+
+
+@router.post(
+    "/bulk",
+    response_model=BankTransactionBulkResultSchema
+)
+def bulk_action(
+    data: BankTransactionBulkActionSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN"))
+):
+    """Excluir / ignorar / reabrir várias transações selecionadas."""
+
+    return BankTransactionService.bulk_action(
+        db,
+        current_user,
+        data.ids,
+        data.acao
     )
 
 

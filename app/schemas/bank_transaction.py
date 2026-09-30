@@ -4,7 +4,9 @@ from datetime import date
 
 from decimal import Decimal
 
-from pydantic import BaseModel
+from typing import Literal
+
+from pydantic import BaseModel, Field
 
 import uuid
 
@@ -69,7 +71,39 @@ class BankTransactionResponseSchema(BaseModel):
 
     conciliado: bool
 
+    # Já era usado pelo frontend (filtro de pendentes, botão "Folha"),
+    # mas não vinha na resposta — então nunca era True na tela.
+    processado: Optional[bool] = False
+
     ignorada: bool
 
     class Config:
         from_attributes = True
+
+
+class BankTransactionBulkActionSchema(BaseModel):
+    """Ação em lote na tela de Conciliação (várias transações selecionadas
+    de uma vez)."""
+
+    ids: list[uuid.UUID] = Field(min_length=1, max_length=1000)
+
+    # EXCLUIR: apaga de vez | IGNORAR: arquiva | REABRIR: desarquiva
+    acao: Literal["EXCLUIR", "IGNORAR", "REABRIR"]
+
+
+class BankTransactionBulkRecusadaSchema(BaseModel):
+
+    id: uuid.UUID
+
+    descricao: Optional[str] = None
+
+    motivo: str
+
+
+class BankTransactionBulkResultSchema(BaseModel):
+
+    acao: str
+
+    processadas: int
+
+    recusadas: list[BankTransactionBulkRecusadaSchema] = []

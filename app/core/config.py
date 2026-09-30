@@ -52,6 +52,18 @@ class Settings(BaseSettings):
     # do proxy_read_timeout padrão do nginx (60s).
     AI_TIMEOUT_SECONDS: int = 50
 
+    # ------------------------------------------------------------------
+    # PUSH NOTIFICATIONS (app mobile, via Expo Push Service)
+    # ------------------------------------------------------------------
+    # Opcional: só é necessário se "Enhanced Security for Push
+    # Notifications" estiver ligado no projeto em expo.dev. Sem isso o
+    # envio funciona normalmente.
+    EXPO_ACCESS_TOKEN: str = ""
+
+    # Quantos dias antes do vencimento o job diário de lembretes avisa
+    # o cliente das contas a pagar (ver app/jobs/due_reminders.py).
+    PUSH_DIAS_AVISO_VENCIMENTO: int = 1
+
     class Config:
         env_file = ".env"
 

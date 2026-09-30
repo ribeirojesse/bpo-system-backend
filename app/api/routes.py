@@ -16,7 +16,8 @@ from app.api.endpoints import (
                                 admin_user,
                                 portal,
                                 dre,
-                                closing_schedule
+                                closing_schedule,
+                                notifications
                               )
 
 
@@ -130,4 +131,13 @@ api_router.include_router(
     closing_schedule.router,
     prefix="/closing-schedules",
     tags=["Cronograma"]
+)
+
+
+# Push notifications e histórico de avisos do app mobile (ver
+# app/api/endpoints/notifications.py e app/services/push_service.py).
+api_router.include_router(
+    notifications.router,
+    prefix="/notifications",
+    tags=["Notificações (app mobile)"]
 )
