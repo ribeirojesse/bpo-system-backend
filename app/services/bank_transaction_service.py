@@ -2,6 +2,8 @@ import hashlib
 
 from fastapi import HTTPException
 
+from sqlalchemy.exc import IntegrityError
+
 from app.models.bank_reconciliation import BankReconciliation
 
 from app.models.payroll_batch import PayrollBatch
@@ -66,11 +68,11 @@ class BankTransactionService:
             data.bank_account_id
         )
 
-        if not account:
+        if not account or account.client_id != data.client_id:
 
             raise HTTPException(
                 status_code=404,
-                detail="Conta bancária não encontrada"
+                detail="Conta bancária não encontrada para este cliente"
             )
 
         payload = data.model_dump()
@@ -91,10 +93,30 @@ class BankTransactionService:
 
         payload["conciliado"] = False
 
-        return BankTransactionRepository.create(
-            db,
-            payload
-        )
+        payload["ignorada"] = False
+
+        payload["processado"] = False
+
+        try:
+
+            return BankTransactionRepository.create(
+                db,
+                payload
+            )
+
+        except IntegrityError:
+
+            # uq_bank_transactions_tenant_hash: mesma data + valor +
+            # descrição + conta já existe (ex.: já veio pelo OFX).
+            db.rollback()
+
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Já existe uma transação idêntica nessa conta "
+                    "(mesma data, valor e descrição)."
+                )
+            )
 
     @staticmethod
     def get_transactions(
@@ -191,11 +213,87 @@ class BankTransactionService:
             exclude_unset=True
         )
 
-        return BankTransactionRepository.update(
-            db,
-            transaction,
-            payload
+        campos_financeiros = {
+            "bank_account_id",
+            "data_transacao",
+            "valor",
+            "tipo",
+        }
+
+        mudou_financeiro = any(
+            campo in payload
+            and payload[campo] is not None
+            and payload[campo] != getattr(transaction, campo)
+            for campo in campos_financeiros
         )
+
+        # Conciliada/processada: o valor, a data, o tipo e a conta já
+        # estão "amarrados" a um lançamento pago/recebido ou à folha —
+        # só descrição/documento podem mudar.
+        if mudou_financeiro and (
+            transaction.conciliado or transaction.processado
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Essa transação já foi conciliada/processada: "
+                    "só a descrição e o documento podem ser editados. "
+                    "Desfaça a conciliação para alterar valor, data, "
+                    "tipo ou conta."
+                )
+            )
+
+        if payload.get("bank_account_id"):
+
+            account = BankAccountRepository.get_by_id(
+                db,
+                current_user.tenant_id,
+                payload["bank_account_id"]
+            )
+
+            if not account or account.client_id != transaction.client_id:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Conta bancária não encontrada para este cliente"
+                )
+
+        # Campos nulos no formulário = "não mexer".
+        payload = {
+            k: v for k, v in payload.items()
+            if v is not None or k == "documento"
+        }
+
+        if mudou_financeiro or "descricao" in payload:
+
+            payload["hash_transacao"] = (
+                BankTransactionService.gerar_hash(
+                    current_user.tenant_id,
+                    payload.get("data_transacao", transaction.data_transacao),
+                    payload.get("valor", transaction.valor),
+                    payload.get("descricao", transaction.descricao),
+                    payload.get("bank_account_id", transaction.bank_account_id)
+                )
+            )
+
+        try:
+
+            return BankTransactionRepository.update(
+                db,
+                transaction,
+                payload
+            )
+
+        except IntegrityError:
+
+            db.rollback()
+
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "Já existe uma transação idêntica nessa conta "
+                    "(mesma data, valor e descrição)."
+                )
+            )
 
     @staticmethod
     def delete_transaction(
