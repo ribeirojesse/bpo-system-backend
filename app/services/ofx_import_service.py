@@ -61,6 +61,43 @@ class OFXImportService:
         return FITID_VAZIO_RE.sub(substituir, dados)
 
     @staticmethod
+    def corrigir_encoding(dados):
+
+        # Alguns bancos (ex.: Itaú) geram o OFX com o cabeçalho dizendo
+        # ENCODING:USASCII / CHARSET:1252, mas gravam os acentos em UTF-8.
+        # A ofxparse confia no cabeçalho e decodifica como cp1252: "É"
+        # vira "Ã‰" e letras como "Í" e "Á" (bytes 0x8D/0x81, que não
+        # existem no cp1252) derrubam o parser com UnicodeDecodeError —
+        # o usuário via "Arquivo OFX inválido ou corrompido".
+        # Se o arquivo é UTF-8 válido com acentos mas o cabeçalho não diz
+        # UTF-8, convertemos o conteúdo para cp1252, que é o que o
+        # cabeçalho promete. Arquivos realmente em cp1252 não decodificam
+        # como UTF-8 e passam intactos.
+
+        cabecalho = dados[:1024].upper()
+
+        if (
+            b"ENCODING:UTF-8" in cabecalho
+            or b"ENCODING:UNICODE" in cabecalho
+            or b'ENCODING="UTF-8"' in cabecalho
+        ):
+            return dados
+
+        try:
+            texto = dados.decode("utf-8")
+        except UnicodeDecodeError:
+            return dados
+
+        if texto.isascii():
+            return dados
+
+        logger.info(
+            "OFX com acentos em UTF-8 e cabeçalho cp1252/ascii: convertendo"
+        )
+
+        return texto.encode("cp1252", errors="replace")
+
+    @staticmethod
     def carregar_ofx(caminho):
 
         try:
@@ -81,6 +118,10 @@ class OFXImportService:
                 dados = f.read()
 
             dados = OFXImportService.sanitizar_bytes(
+                dados
+            )
+
+            dados = OFXImportService.corrigir_encoding(
                 dados
             )
 
