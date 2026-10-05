@@ -46,6 +46,11 @@ def import_ofx(
     # (ex.: zeros à esquerda, máscara diferente). Agora usamos a conta que
     # a pessoa efetivamente selecionou.
     bank_account_id: str = Form(...),
+    # VERIFICAR (padrão): se o arquivo tiver transações já importadas,
+    # não grava nada e responde 409 com o resumo, pra tela perguntar.
+    # IGNORAR: grava só as novas. SUBSTITUIR: troca as antigas pelas do
+    # arquivo (exceto as já conciliadas). Ver OFXImportService.importar.
+    modo: str = Form("VERIFICAR"),
     db: Session = Depends(get_db),
     current_user: User = Depends(
         require_role("ADMIN")
@@ -64,11 +69,10 @@ def import_ofx(
             buffer
         )
 
-    resultado = OFXImportService.importar(
+    return OFXImportService.importar(
         db,
         current_user,
         caminho,
-        bank_account_id
+        bank_account_id,
+        modo
     )
-
-    return resultado
