@@ -26,6 +26,7 @@ from app.models.payroll_batch import PayrollBatch
 from app.models.ai_reconciliation_suggestion import AIReconciliationSuggestion
 from app.models.push_device import PushDevice
 from app.models.notification import Notification
+from app.models.lead import Lead
 
 
 config = context.config

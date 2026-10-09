@@ -17,7 +17,8 @@ from app.api.endpoints import (
                                 portal,
                                 dre,
                                 closing_schedule,
-                                notifications
+                                notifications,
+                                lead
                               )
 
 
@@ -140,4 +141,14 @@ api_router.include_router(
     notifications.router,
     prefix="/notifications",
     tags=["Notificações (app mobile)"]
+)
+
+
+# Leads do formulário do site: POST /leads/public é aberto (com limite
+# por IP); listar e mudar status é só ADMIN/SUPER_ADMIN (ver
+# app/api/endpoints/lead.py).
+api_router.include_router(
+    lead.router,
+    prefix="/leads",
+    tags=["Leads do site"]
 )
