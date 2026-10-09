@@ -154,6 +154,51 @@ class AccountsPayableService:
             exclude_unset=True
         )
 
+        # Mesmas checagens de tenant do create: sem elas, um usuário
+        # autenticado poderia apontar a conta para contato/categoria/
+        # subcategoria de outro tenant informando o UUID.
+        if payload.get("financial_contact_id"):
+
+            contact = FinancialContactRepository.get_by_id(
+                db,
+                current_user.tenant_id,
+                payload["financial_contact_id"]
+            )
+
+            if not contact:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Contato não encontrado"
+                )
+
+        if payload.get("category_id"):
+
+            category = ExpenseCategoryRepository.get_by_id(
+                db,
+                current_user.tenant_id,
+                payload["category_id"]
+            )
+
+            if not category:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Categoria não encontrada"
+                )
+
+        if payload.get("subcategory_id"):
+
+            subcategory = ExpenseSubcategoryRepository.get_by_id(
+                db,
+                current_user.tenant_id,
+                payload["subcategory_id"]
+            )
+
+            if not subcategory:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Subcategoria não encontrada"
+                )
+
         return AccountsPayableRepository.update(
             db,
             payable,

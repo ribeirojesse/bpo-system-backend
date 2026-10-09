@@ -2,7 +2,7 @@ from typing import Optional
 
 from uuid import UUID
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class ExpenseSubcategoryCreateSchema(
@@ -11,14 +11,14 @@ class ExpenseSubcategoryCreateSchema(
 
     category_id: UUID
 
-    nome: str
+    nome: str = Field(min_length=1, max_length=200)
 
 
 class ExpenseSubcategoryUpdateSchema(
     BaseModel
 ):
 
-    nome: Optional[str] = None
+    nome: Optional[str] = Field(None, min_length=1, max_length=200)
 
     ativo: Optional[bool] = None
 

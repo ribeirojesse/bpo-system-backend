@@ -1,3 +1,5 @@
+import re
+
 from fastapi import (
     APIRouter,
     Depends
@@ -131,10 +133,15 @@ def gerar_dre_pdf(
 
     pdf_bytes = DrePdfService.gerar(dados)
 
-    nome_arquivo = (
-        f"DRE_{dados['cliente_nome']}_{dados['ano']}.pdf"
-        .replace(" ", "_")
-    )
+    # O nome do cliente vem do cadastro (texto livre): deixa só caracteres
+    # seguros para não quebrar nem injetar nada no cabeçalho HTTP.
+    cliente_seguro = re.sub(
+        r"[^A-Za-z0-9_.-]+",
+        "_",
+        str(dados["cliente_nome"])
+    ).strip("_") or "cliente"
+
+    nome_arquivo = f"DRE_{cliente_seguro}_{dados['ano']}.pdf"
 
     return Response(
         content=pdf_bytes,

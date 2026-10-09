@@ -59,7 +59,7 @@ def create_transaction(
     response_model=list[BankTransactionResponseSchema]
 )
 def get_transactions(
-    skip: int = 0,
+    skip: int = Query(0, ge=0),
     # Padrão continua 100 (compatível), mas as telas pedem mais: com só
     # 100 da carteira inteira, transações ficavam de fora da lista.
     limit: int = Query(100, ge=1, le=20000),

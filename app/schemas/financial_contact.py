@@ -1,44 +1,48 @@
 import uuid
 
-from typing import Optional
+from typing import Literal, Optional
 
 from pydantic import (
     BaseModel,
     EmailStr,
-    ConfigDict
+    ConfigDict,
+    Field
 )
+
+
+TipoContato = Literal["PAGAR", "RECEBER", "AMBOS", "FUNCIONARIO"]
 
 
 class FinancialContactCreateSchema(BaseModel):
 
     client_id: uuid.UUID
 
-    nome: str
+    nome: str = Field(min_length=1, max_length=200)
 
-    documento: Optional[str] = None
+    documento: Optional[str] = Field(None, max_length=30)
 
     email: Optional[EmailStr] = None
 
-    telefone: Optional[str] = None
+    telefone: Optional[str] = Field(None, max_length=30)
 
-    tipo: Optional[str] = "AMBOS"
+    tipo: Optional[TipoContato] = "AMBOS"
 
-    observacao: Optional[str] = None
+    observacao: Optional[str] = Field(None, max_length=2000)
 
 
 class FinancialContactUpdateSchema(BaseModel):
 
-    nome: Optional[str] = None
+    nome: Optional[str] = Field(None, min_length=1, max_length=200)
 
-    documento: Optional[str] = None
+    documento: Optional[str] = Field(None, max_length=30)
 
     email: Optional[EmailStr] = None
 
-    telefone: Optional[str] = None
+    telefone: Optional[str] = Field(None, max_length=30)
 
-    tipo: Optional[str] = None
+    tipo: Optional[TipoContato] = None
 
-    observacao: Optional[str] = None
+    observacao: Optional[str] = Field(None, max_length=2000)
 
     ativo: Optional[bool] = None
 

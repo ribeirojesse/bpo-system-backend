@@ -14,6 +14,7 @@ from sqlalchemy.orm import Session
 
 from app.core.database import get_db
 from app.core.files import gerar_nome_seguro
+from app.core.rate_limit import rate_limit
 
 from app.dependencies.auth import (
     require_role
@@ -115,7 +116,11 @@ def payroll_capabilities(
     }
 
 
-@router.post("/preview")
+@router.post(
+    "/preview",
+    # Pode chamar a IA (custo) — limita por IP.
+    dependencies=[Depends(rate_limit("payroll-preview", 20, 60))]
+)
 def preview_payroll(
     transaction_id: str = Form(...),
     file: UploadFile = File(...),
@@ -138,7 +143,10 @@ def preview_payroll(
     )
 
 
-@router.post("/process")
+@router.post(
+    "/process",
+    dependencies=[Depends(rate_limit("payroll-process", 20, 60))]
+)
 def process_payroll(
     transaction_id: str = Form(...),
     competencia: str = Form(...),

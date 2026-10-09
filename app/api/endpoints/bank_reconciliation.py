@@ -2,12 +2,15 @@ import uuid
 
 from fastapi import (
     APIRouter,
-    Depends
+    Depends,
+    Query
 )
 
 from sqlalchemy.orm import Session
 
 from app.core.database import get_db
+
+from app.core.rate_limit import rate_limit
 
 from app.dependencies.auth import (
     require_role
@@ -93,8 +96,8 @@ def create_reconciliation(
     ]
 )
 def get_reconciliations(
-    skip: int = 0,
-    limit: int = 100,
+    skip: int = Query(0, ge=0),
+    limit: int = Query(100, ge=1, le=1000),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ):
@@ -157,7 +160,13 @@ def get_ai_suggestions(
 
 @router.post(
     "/ai-suggestions",
-    response_model=AISuggestionGenerateResponseSchema
+    response_model=AISuggestionGenerateResponseSchema,
+    # Cada chamada consome a API paga da Anthropic; o frontend repete o
+    # pedido em lotes de 20, então 30/min é folgado para uso normal.
+    dependencies=[
+        Depends(rate_limit("ai-suggestions", 30, 60)),
+        Depends(rate_limit("ai-suggestions-hora", 300, 3600)),
+    ]
 )
 def generate_ai_suggestions(
     data: AISuggestionGenerateSchema,

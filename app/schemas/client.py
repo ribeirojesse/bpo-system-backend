@@ -4,28 +4,31 @@ from typing import Optional
 
 from pydantic import (
     BaseModel,
-    EmailStr
+    EmailStr,
+    Field
 )
+
+from app.core.password_policy import SenhaOpcional
 
 
 class ClientCreateSchema(BaseModel):
 
-    razao_social: str
-    nome_fantasia: Optional[str] = None
-    cnpj: str
+    razao_social: str = Field(min_length=1, max_length=200)
+    nome_fantasia: Optional[str] = Field(None, max_length=200)
+    cnpj: str = Field(min_length=1, max_length=30)
 
     email: Optional[EmailStr] = None
-    telefone: Optional[str] = None
+    telefone: Optional[str] = Field(None, max_length=30)
 
 
 class ClientUpdateSchema(BaseModel):
 
-    razao_social: Optional[str] = None
-    nome_fantasia: Optional[str] = None
-    cnpj: Optional[str] = None
+    razao_social: Optional[str] = Field(None, min_length=1, max_length=200)
+    nome_fantasia: Optional[str] = Field(None, max_length=200)
+    cnpj: Optional[str] = Field(None, min_length=1, max_length=30)
 
     email: Optional[EmailStr] = None
-    telefone: Optional[str] = None
+    telefone: Optional[str] = Field(None, max_length=30)
 
 
 class ClientResponseSchema(BaseModel):
@@ -57,4 +60,4 @@ class ClientPortalAccessResponseSchema(BaseModel):
 class ClientPortalAccessUpdateSchema(BaseModel):
 
     email: Optional[EmailStr] = None
-    password: Optional[str] = None
+    password: SenhaOpcional = None

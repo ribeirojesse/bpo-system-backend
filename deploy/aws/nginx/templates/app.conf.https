@@ -12,6 +12,12 @@
 # O PASSO 1 (bootstrap, só HTTP, usado pra emitir o primeiro certificado
 # num domínio novo) fica em nginx/templates/app.conf.bootstrap-http.
 
+# Rate limiting global por IP (segunda camada: a API também limita por
+# conta própria, ver app/core/rate_limit.py). Estas diretivas ficam no
+# nível http porque conf.d/*.conf é incluído dentro do bloco http do nginx.
+limit_req_zone $binary_remote_addr zone=api_geral:10m rate=20r/s;
+limit_req_zone $binary_remote_addr zone=api_login:10m rate=10r/m;
+
 server {
     listen 80;
     server_name api.towerbpo.com;
@@ -45,10 +51,31 @@ server {
     add_header X-Content-Type-Options nosniff always;
     add_header X-Frame-Options DENY always;
     add_header Referrer-Policy strict-origin-when-cross-origin always;
+    # A API só devolve JSON/arquivos: nada de scripts, frames ou recursos
+    # externos jamais deveria ser carregado a partir dela.
+    add_header Content-Security-Policy "default-src 'none'; frame-ancestors 'none'" always;
+    add_header Permissions-Policy "geolocation=(), microphone=(), camera=()" always;
+
+    server_tokens off;
 
     client_max_body_size 20M;
 
+    # Login e renovação de sessão: limite bem mais apertado (força bruta).
+    location ~ ^/api/routes/auth/(login|refresh|mobile/login|mobile/refresh)$ {
+        limit_req zone=api_login burst=5 nodelay;
+        limit_req_status 429;
+
+        proxy_pass http://api:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
     location / {
+        limit_req zone=api_geral burst=60 nodelay;
+        limit_req_status 429;
+
         proxy_pass http://api:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;

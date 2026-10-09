@@ -6,8 +6,10 @@ services:
   api:
     build: .
     container_name: bpo_api
+    # Só acessível da própria máquina (127.0.0.1): este compose é de
+    # desenvolvimento e não deve ficar exposto na rede local/pública.
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8000:8000"
 
     volumes:
       - .:/app
@@ -28,10 +30,13 @@ services:
     environment:
       POSTGRES_DB: bpo_db
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
+      # Sobrescreva com POSTGRES_PASSWORD no ambiente/.env do compose para
+      # não usar a senha padrão. (Só vale na criação do volume; para um
+      # volume já existente a senha continua a de antes.)
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
 
     ports:
-      - "5434:5432"
+      - "127.0.0.1:5434:5432"
 
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -44,11 +49,11 @@ services:
     restart: always
 
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@admin.com
-      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@admin.com}
+      PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
 
     ports:
-      - "5050:80"
+      - "127.0.0.1:5050:80"
 
     depends_on:
       - postgres

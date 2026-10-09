@@ -1,5 +1,7 @@
 from fastapi import HTTPException
 
+from app.core.password_policy import gerar_senha_temporaria
+
 from app.core.security import hash_password
 
 from app.models.user import User
@@ -226,9 +228,12 @@ class ClientService:
                 client_id=client.id,
                 nome="Acesso do Cliente",
                 email=novo_email,
+                # Sem senha informada, nasce com uma senha aleatória que
+                # ninguém conhece (nunca uma senha padrão fixa): o ADMIN
+                # define a senha real em seguida pelo mesmo endpoint.
                 senha_hash=payload.get(
                     "senha_hash",
-                    hash_password("Cliente@123")
+                    hash_password(gerar_senha_temporaria())
                 ),
                 role="CLIENTE"
             )

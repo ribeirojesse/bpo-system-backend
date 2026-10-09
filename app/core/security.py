@@ -32,6 +32,18 @@ def verify_password(
     )
 
 
+# Hash fixo usado só para "gastar" o mesmo tempo de um bcrypt quando o
+# e-mail informado no login não existe. Sem isso, e-mail inexistente
+# responde bem mais rápido que e-mail existente com senha errada, e dá
+# para descobrir quais e-mails estão cadastrados medindo o tempo.
+_HASH_FALSO = pwd_context.hash("senha-que-nao-pertence-a-ninguem")
+
+
+def gastar_tempo_de_verificacao(plain_password: str) -> None:
+
+    pwd_context.verify(plain_password, _HASH_FALSO)
+
+
 # ============================================================
 # ACCESS TOKEN
 # ============================================================

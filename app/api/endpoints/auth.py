@@ -6,7 +6,13 @@ from app.core.config import settings
 
 from app.core.database import get_db
 
-from app.core.security import verify_password, create_access_token
+from app.core.rate_limit import rate_limit
+
+from app.core.security import (
+    verify_password,
+    create_access_token,
+    gastar_tempo_de_verificacao,
+)
 
 from app.models.user import User
 
@@ -21,6 +27,16 @@ from app.dependencies.auth import get_current_user
 from app.services.refresh_token_service import RefreshTokenService
 
 router = APIRouter()
+
+
+# Limites por IP (ver app/core/rate_limit.py). Duas janelas no login: uma
+# curta contra rajadas e uma longa contra tentativas lentas e contínuas.
+_LIMITE_LOGIN = [
+    Depends(rate_limit("login", 10, 60)),
+    Depends(rate_limit("login-longo", 40, 900)),
+]
+
+_LIMITE_REFRESH = [Depends(rate_limit("refresh", 30, 60))]
 
 
 # ============================================================
@@ -94,12 +110,14 @@ def _clear_auth_cookies(response: Response):
 # ============================================================
 
 
-@router.post("/login")
+@router.post("/login", dependencies=_LIMITE_LOGIN)
 def login(data: LoginSchema, response: Response, db: Session = Depends(get_db)):
 
     user = db.query(User).filter(User.email == data.email).first()
 
     if not user:
+
+        gastar_tempo_de_verificacao(data.password)
 
         raise HTTPException(status_code=400, detail="Email ou senha inválidos")
 
@@ -131,7 +149,7 @@ def login(data: LoginSchema, response: Response, db: Session = Depends(get_db)):
 # ============================================================
 
 
-@router.post("/refresh")
+@router.post("/refresh", dependencies=_LIMITE_REFRESH)
 def refresh(request: Request, response: Response, db: Session = Depends(get_db)):
 
     refresh_token = request.cookies.get("refresh_token")
@@ -243,7 +261,13 @@ def _autenticar(db: Session, data: LoginSchema) -> User:
 
     user = db.query(User).filter(User.email == data.email).first()
 
-    if not user or not verify_password(data.password, user.senha_hash):
+    if not user:
+
+        gastar_tempo_de_verificacao(data.password)
+
+        raise HTTPException(status_code=400, detail="Email ou senha inválidos")
+
+    if not verify_password(data.password, user.senha_hash):
 
         raise HTTPException(status_code=400, detail="Email ou senha inválidos")
 
@@ -270,7 +294,11 @@ def _emitir_tokens_mobile(db: Session, user: User) -> dict:
     }
 
 
-@router.post("/mobile/login", response_model=MobileTokenResponseSchema)
+@router.post(
+    "/mobile/login",
+    response_model=MobileTokenResponseSchema,
+    dependencies=_LIMITE_LOGIN,
+)
 def mobile_login(data: LoginSchema, db: Session = Depends(get_db)):
 
     user = _autenticar(db, data)
@@ -280,7 +308,11 @@ def mobile_login(data: LoginSchema, db: Session = Depends(get_db)):
     return _emitir_tokens_mobile(db, user)
 
 
-@router.post("/mobile/refresh", response_model=MobileTokenResponseSchema)
+@router.post(
+    "/mobile/refresh",
+    response_model=MobileTokenResponseSchema,
+    dependencies=_LIMITE_REFRESH,
+)
 def mobile_refresh(data: RefreshTokenSchema, db: Session = Depends(get_db)):
 
     token = RefreshTokenService.validate(db, data.refresh_token)

@@ -1,12 +1,19 @@
-from typing import Optional
+from typing import Literal, Optional
 
 from datetime import date
 
 from decimal import Decimal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 import uuid
+
+
+# Tetos de tamanho/valor aceitos na entrada (a resposta não usa estes).
+_DESCRICAO = dict(min_length=1, max_length=500)
+_VALOR = dict(gt=0, le=Decimal("9999999999.99"))
+_COMPETENCIA = dict(max_length=20)
+_OBSERVACAO = dict(max_length=2000)
 
 
 class AccountsReceivableCreateSchema(BaseModel):
@@ -19,9 +26,9 @@ class AccountsReceivableCreateSchema(BaseModel):
 
     subcategory_id: Optional[uuid.UUID] = None
 
-    descricao: str
+    descricao: str = Field(**_DESCRICAO)
 
-    valor: Decimal
+    valor: Decimal = Field(**_VALOR)
 
     vencimento: date
 
@@ -31,26 +38,28 @@ class AccountsReceivableCreateSchema(BaseModel):
     # lançamento.
     data_recebimento: Optional[date] = None
 
-    competencia: Optional[str] = None
+    competencia: Optional[str] = Field(None, **_COMPETENCIA)
 
-    observacao: Optional[str] = None
+    observacao: Optional[str] = Field(None, **_OBSERVACAO)
 
 
 class AccountsReceivableUpdateSchema(BaseModel):
 
-    descricao: Optional[str] = None
+    # Contato/categoria/subcategoria não são editáveis aqui (o schema
+    # nunca os aceitou), então não há referência a revalidar no update.
+    descricao: Optional[str] = Field(None, **_DESCRICAO)
 
-    valor: Optional[Decimal] = None
+    valor: Optional[Decimal] = Field(None, **_VALOR)
 
     vencimento: Optional[date] = None
 
     data_recebimento: Optional[date] = None
 
-    competencia: Optional[str] = None
+    competencia: Optional[str] = Field(None, **_COMPETENCIA)
 
-    status: Optional[str] = None
+    status: Optional[Literal["PENDENTE", "RECEBIDO"]] = None
 
-    observacao: Optional[str] = None
+    observacao: Optional[str] = Field(None, **_OBSERVACAO)
 
 
 class AccountsReceivableResponseSchema(BaseModel):

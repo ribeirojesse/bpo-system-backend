@@ -1,11 +1,13 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class LoginSchema(BaseModel):
 
     email: EmailStr
 
-    password: str
+    # Sem mínimo aqui de propósito (senhas antigas continuam entrando);
+    # o teto evita mandar megabytes de texto para o bcrypt.
+    password: str = Field(min_length=1, max_length=128)
 
 
 class TokenSchema(BaseModel):
@@ -17,7 +19,7 @@ class TokenSchema(BaseModel):
 
 class RefreshTokenSchema(BaseModel):
 
-    refresh_token: str
+    refresh_token: str = Field(min_length=1, max_length=2048)
 
 
 # ------------------------------------------------------------------

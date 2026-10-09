@@ -1,4 +1,17 @@
+from pydantic import model_validator
+
 from pydantic_settings import BaseSettings
+
+
+# Valores de exemplo/placeholder que jamais podem assinar tokens em
+# produção.
+_SECRETS_PROIBIDOS = {
+    "changeme",
+    "secret",
+    "secretkey",
+    "sua_chave_secreta",
+    "your-secret-key",
+}
 
 
 class Settings(BaseSettings):
@@ -66,6 +79,24 @@ class Settings(BaseSettings):
 
     class Config:
         env_file = ".env"
+
+    @model_validator(mode="after")
+    def _exigir_secret_forte_em_producao(self):
+        """Em produção a API se recusa a subir com uma SECRET_KEY curta ou
+        de exemplo — quem souber a chave consegue forjar o token de
+        qualquer usuário. Em desenvolvimento nada muda."""
+
+        if self.ENVIRONMENT == "production":
+
+            chave = self.SECRET_KEY.strip()
+
+            if len(chave) < 32 or chave.lower() in _SECRETS_PROIBIDOS:
+                raise ValueError(
+                    "SECRET_KEY fraca para produção: use pelo menos 32 "
+                    "caracteres aleatórios (ex.: openssl rand -hex 32)"
+                )
+
+        return self
 
     @property
     def allowed_origins_list(self) -> list[str]:
