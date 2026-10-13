@@ -9,6 +9,14 @@ import uuid
 from pydantic import BaseModel, Field
 
 
+class RateioItemSchema(BaseModel):
+    """Uma parte do rateio de uma transação: o que é e quanto vale."""
+
+    descricao: str = Field(min_length=1, max_length=500)
+
+    valor: Decimal = Field(gt=0, le=Decimal("9999999999.99"))
+
+
 class BankReconciliationFromTransactionSchema(BaseModel):
     """Concilia uma transação bancária criando, no mesmo passo, o
     lançamento financeiro (conta a pagar ou a receber) correspondente —
@@ -24,6 +32,14 @@ class BankReconciliationFromTransactionSchema(BaseModel):
     competencia: Optional[str] = None
 
     observacao: Optional[str] = None
+
+    # Rateio: divide a transação em várias partes (cada uma vira um
+    # lançamento) com a MESMA categoria, subcategoria, competência e
+    # contato. A soma das partes precisa ser igual ao valor da transação.
+    rateio: Optional[list[RateioItemSchema]] = Field(
+        default=None,
+        max_length=100
+    )
 
 
 class BankReconciliationCreateSchema(BaseModel):

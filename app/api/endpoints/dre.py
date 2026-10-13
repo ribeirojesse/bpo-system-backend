@@ -168,7 +168,8 @@ def exportar_lancamentos_excel(
         current_user,
         params.client_id,
         params.data_inicio,
-        params.data_fim
+        params.data_fim,
+        params.bank_account_id
     )
 
     conteudo = dre_excel_service.gerar(dados)

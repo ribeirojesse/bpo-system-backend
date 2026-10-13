@@ -85,6 +85,10 @@ def gerar(dados) -> bytes:
     )
     ws["A2"].font = Font(size=11, color=_COR_TEXTO)
 
+    if dados.get("conta_filtro"):
+        ws["A3"] = f"Conta bancária: {dados['conta_filtro']}"
+        ws["A3"].font = Font(size=11, color=_COR_TEXTO)
+
     # ---------------- resumo (fórmulas) ----------------
     primeira = _LINHA_CABECALHO + 1
     ultima = _LINHA_CABECALHO + max(len(lancamentos), 1)

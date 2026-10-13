@@ -192,6 +192,30 @@ class DreService:
     # ------------------------------------------------------------
 
     @staticmethod
+    def _validar_conta(db, current_user, client_id, bank_account_id):
+        """Garante que a conta bancária do filtro existe, é do tenant e do
+        cliente do relatório (sem isso daria pra sondar contas de outro
+        cliente). Devolve o nome de exibição."""
+
+        conta = (
+            db.query(BankAccount)
+            .filter(
+                BankAccount.id == bank_account_id,
+                BankAccount.tenant_id == current_user.tenant_id,
+                BankAccount.client_id == client_id,
+            )
+            .first()
+        )
+
+        if not conta:
+            raise HTTPException(
+                status_code=404,
+                detail="Conta bancária não encontrada"
+            )
+
+        return f"{conta.banco} • {conta.conta}"
+
+    @staticmethod
     def _data_efetiva(item, campo_pagamento):
 
         return getattr(item, campo_pagamento) or item.vencimento
@@ -246,6 +270,13 @@ class DreService:
         if params.template_id:
             template = DreService.get_template(
                 db, current_user, params.template_id
+            )
+
+        conta_filtro = None
+
+        if params.bank_account_id:
+            conta_filtro = DreService._validar_conta(
+                db, current_user, client_id, params.bank_account_id
             )
 
         payables = (
@@ -508,6 +539,7 @@ class DreService:
             "despesa_anual": sum(totais_despesa),
             "resultado_anual": sum(totais_resultado),
             "cor_destaque": template.cor_destaque if template else None,
+            "conta_filtro": conta_filtro,
         }
 
     # ------------------------------------------------------------
@@ -523,7 +555,8 @@ class DreService:
         current_user,
         requested_client_id,
         data_inicio,
-        data_fim
+        data_fim,
+        bank_account_id=None
     ):
         """Lançamentos pagos (contas a pagar PAGAS) e recebidos (contas a
         receber RECEBIDAS) com data efetiva — pagamento/recebimento, ou o
@@ -604,6 +637,24 @@ class DreService:
             [r.id for r in receivables],
             "accounts_receivable_id",
         )
+
+        conta_filtro = None
+
+        if bank_account_id:
+
+            conta_filtro = DreService._validar_conta(
+                db, current_user, client_id, bank_account_id
+            )
+
+            payables = [
+                p for p in payables
+                if banco_por_payable.get(p.id) == bank_account_id
+            ]
+
+            receivables = [
+                r for r in receivables
+                if banco_por_receivable.get(r.id) == bank_account_id
+            ]
 
         itens = payables + receivables
 
@@ -700,5 +751,6 @@ class DreService:
             "cliente_nome": client.nome_fantasia or client.razao_social,
             "data_inicio": data_inicio,
             "data_fim": data_fim,
+            "conta_filtro": conta_filtro,
             "lancamentos": lancamentos,
         }

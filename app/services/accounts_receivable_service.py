@@ -20,6 +20,8 @@ from app.repositories.accounts_receivable_repository import (
     AccountsReceivableRepository
 )
 
+from app.services.dre_service import DreService
+
 
 class AccountsReceivableService:
 
@@ -105,15 +107,31 @@ class AccountsReceivableService:
         db,
         current_user,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
+        client_id=None
     ):
 
-        return AccountsReceivableRepository.get_all(
+        receivables = AccountsReceivableRepository.get_all(
             db,
             current_user.tenant_id,
             skip,
-            limit
+            limit,
+            client_id
         )
+
+        # Banco de cada conta = o da transação do extrato conciliada com
+        # ela (usado pelo filtro por banco da tela).
+        bancos = DreService._mapa_banco_por_lancamento(
+            db,
+            current_user.tenant_id,
+            [r.id for r in receivables],
+            "accounts_receivable_id",
+        )
+
+        for r in receivables:
+            r.bank_account_id = bancos.get(r.id)
+
+        return receivables
 
     @staticmethod
     def get_receivable(

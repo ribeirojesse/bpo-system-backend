@@ -4,6 +4,10 @@ from app.models.bank_reconciliation import (
     BankReconciliation
 )
 
+from app.models.bank_transaction import (
+    BankTransaction
+)
+
 
 class BankReconciliationRepository:
 
@@ -30,14 +34,32 @@ class BankReconciliationRepository:
         db: Session,
         tenant_id,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
+        client_id=None
     ):
 
+        query = db.query(BankReconciliation).filter(
+            BankReconciliation.tenant_id
+            == tenant_id
+        )
+
+        # O cliente da conciliação é o da transação bancária vinculada.
+        if client_id:
+            query = query.join(
+                BankTransaction,
+                BankTransaction.id
+                == BankReconciliation.bank_transaction_id
+            ).filter(
+                BankTransaction.client_id == client_id
+            )
+
+        # Mais recentes primeiro (antes sem ordem: o "limite" cortava
+        # registros arbitrários da carteira inteira).
         return (
-            db.query(BankReconciliation)
-            .filter(
-                BankReconciliation.tenant_id
-                == tenant_id
+            query
+            .order_by(
+                BankReconciliation.data_conciliacao.desc(),
+                BankReconciliation.id
             )
             .offset(skip)
             .limit(limit)

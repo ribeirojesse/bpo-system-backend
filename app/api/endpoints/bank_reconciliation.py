@@ -98,6 +98,7 @@ def create_reconciliation(
 def get_reconciliations(
     skip: int = Query(0, ge=0),
     limit: int = Query(100, ge=1, le=1000),
+    client_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ):
@@ -107,7 +108,8 @@ def get_reconciliations(
             db,
             current_user,
             skip,
-            limit
+            limit,
+            client_id
         )
     )
 
@@ -119,6 +121,7 @@ def get_reconciliations(
     ]
 )
 def get_suggestions(
+    client_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ):
@@ -130,7 +133,8 @@ def get_suggestions(
     return (
         BankReconciliationService.get_suggestions(
             db,
-            current_user
+            current_user,
+            client_id
         )
     )
 

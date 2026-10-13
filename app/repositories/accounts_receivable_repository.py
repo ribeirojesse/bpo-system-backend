@@ -25,13 +25,27 @@ class AccountsReceivableRepository:
         db: Session,
         tenant_id,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
+        client_id=None
     ):
 
+        query = db.query(AccountsReceivable).filter(
+            AccountsReceivable.tenant_id == tenant_id
+        )
+
+        # Filtra no banco (antes a tela buscava só os primeiros N da
+        # carteira inteira e filtrava o cliente no navegador, então
+        # clientes com lançamentos "fora" dessa janela apareciam vazios).
+        if client_id:
+            query = query.filter(
+                AccountsReceivable.client_id == client_id
+            )
+
         return (
-            db.query(AccountsReceivable)
-            .filter(
-                AccountsReceivable.tenant_id == tenant_id
+            query
+            .order_by(
+                AccountsReceivable.vencimento.desc(),
+                AccountsReceivable.id
             )
             .offset(skip)
             .limit(limit)

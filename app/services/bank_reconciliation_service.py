@@ -1,5 +1,7 @@
 import re
 
+from functools import lru_cache
+
 import unicodedata
 
 from collections import Counter
@@ -49,6 +51,15 @@ from app.models.accounts_payable import AccountsPayable
 from app.models.accounts_receivable import AccountsReceivable
 
 from app.models.bank_reconciliation import BankReconciliation
+
+
+@lru_cache(maxsize=50000)
+def _normalizar_cache(texto):
+    """Normalização (regex + unicode) é o custo dominante ao comparar a
+    descrição de cada transação com centenas de lançamentos/contatos; as
+    mesmas descrições se repetem, então o resultado fica em cache."""
+
+    return BankReconciliationService._normalizar_texto(texto)
 
 
 class BankReconciliationService:
@@ -187,9 +198,9 @@ class BankReconciliationService:
     @staticmethod
     def _similaridade_descricao(a, b):
 
-        a = BankReconciliationService._normalizar_texto(a)
+        a = _normalizar_cache(a)
 
-        b = BankReconciliationService._normalizar_texto(b)
+        b = _normalizar_cache(b)
 
         if not a or not b:
             return 0.0
@@ -201,7 +212,8 @@ class BankReconciliationService:
         db,
         current_user,
         transaction,
-        Model
+        Model,
+        historico=None
     ):
         """Quando não existe nenhum lançamento candidato pra vincular
         (nem por valor+data, nem por descrição parecida), ainda dá pra
@@ -210,24 +222,27 @@ class BankReconciliationService:
         categoria mais usados nesses casos — só pra pré-preencher o
         formulário de "Criar lançamento", nunca pra vincular sozinho."""
 
-        historico = (
-            db.query(Model)
-            .filter(
-                Model.tenant_id
-                == current_user.tenant_id,
+        # `historico` vem pré-carregado de get_suggestions (uma consulta
+        # por cliente/tipo, em vez de uma por transação).
+        if historico is None:
+            historico = (
+                db.query(Model)
+                .filter(
+                    Model.tenant_id
+                    == current_user.tenant_id,
 
-                Model.client_id
-                == transaction.client_id,
+                    Model.client_id
+                    == transaction.client_id,
+                )
+                .order_by(
+                    Model.vencimento.desc()
+                )
+                .limit(
+                    BankReconciliationService
+                    .HISTORICO_LIMITE
+                )
+                .all()
             )
-            .order_by(
-                Model.vencimento.desc()
-            )
-            .limit(
-                BankReconciliationService
-                .HISTORICO_LIMITE
-            )
-            .all()
-        )
 
         candidatos = [
             item for item in historico
@@ -290,7 +305,8 @@ class BankReconciliationService:
     def _sugerir_contato_por_nome(
         db,
         current_user,
-        transaction
+        transaction,
+        contatos=None
     ):
         """Último recurso, quando nem um lançamento candidato (por valor
         e data) nem o histórico de lançamentos parecidos encontrou nada
@@ -303,20 +319,21 @@ class BankReconciliationService:
         sugere o contato pra pré-preencher o formulário; categoria e
         subcategoria ficam em branco."""
 
-        contatos = (
-            db.query(FinancialContact)
-            .filter(
-                FinancialContact.tenant_id
-                == current_user.tenant_id,
+        if contatos is None:
+            contatos = (
+                db.query(FinancialContact)
+                .filter(
+                    FinancialContact.tenant_id
+                    == current_user.tenant_id,
 
-                FinancialContact.client_id
-                == transaction.client_id,
+                    FinancialContact.client_id
+                    == transaction.client_id,
 
-                FinancialContact.ativo
-                == True,  # noqa: E712
+                    FinancialContact.ativo
+                    == True,  # noqa: E712
+                )
+                .all()
             )
-            .all()
-        )
 
         melhor_contato = None
         melhor_similaridade = 0.0
@@ -665,6 +682,16 @@ class BankReconciliationService:
 
         is_credito = transaction.tipo == "CREDITO"
 
+        if data.rateio:
+
+            return BankReconciliationService._conciliar_com_rateio(
+                db,
+                current_user,
+                transaction,
+                data,
+                is_credito
+            )
+
         entry_fields = dict(
             tenant_id=current_user.tenant_id,
             client_id=transaction.client_id,
@@ -722,7 +749,8 @@ class BankReconciliationService:
     @staticmethod
     def get_suggestions(
         db,
-        current_user
+        current_user,
+        client_id=None
     ):
         """Para cada transação bancária ainda não conciliada (e não
         ignorada/processada), procura um lançamento já existente — conta
@@ -752,7 +780,7 @@ class BankReconciliationService:
         mostra o melhor candidato ao lado (quando existe) pra conciliar
         num clique só."""
 
-        transactions = (
+        transacoes_query = (
             db.query(BankTransaction)
             .filter(
                 BankTransaction.tenant_id
@@ -767,8 +795,72 @@ class BankReconciliationService:
                 BankTransaction.ignorada
                 == False,  # noqa: E712
             )
-            .all()
         )
+
+        # A tela só mostra um cliente por vez: calcular para a carteira
+        # inteira era o que mais pesava.
+        if client_id:
+            transacoes_query = transacoes_query.filter(
+                BankTransaction.client_id == client_id
+            )
+
+        transactions = transacoes_query.all()
+
+        # Dados reaproveitados entre as transações (antes: 3 consultas
+        # por transação). Chave = (tipo do lançamento, cliente).
+        cache_lancamentos = {}
+        cache_historico = {}
+        cache_contatos = {}
+
+        def lancamentos_do_cliente(Model, cid):
+
+            chave = (Model, cid)
+
+            if chave not in cache_lancamentos:
+                cache_lancamentos[chave] = (
+                    db.query(Model)
+                    .filter(
+                        Model.tenant_id
+                        == current_user.tenant_id,
+
+                        Model.client_id == cid,
+                    )
+                    .all()
+                )
+
+            return cache_lancamentos[chave]
+
+        def historico_do_cliente(Model, cid):
+
+            chave = (Model, cid)
+
+            if chave not in cache_historico:
+                cache_historico[chave] = sorted(
+                    lancamentos_do_cliente(Model, cid),
+                    key=lambda item: item.vencimento,
+                    reverse=True,
+                )[:BankReconciliationService.HISTORICO_LIMITE]
+
+            return cache_historico[chave]
+
+        def contatos_do_cliente(cid):
+
+            if cid not in cache_contatos:
+                cache_contatos[cid] = (
+                    db.query(FinancialContact)
+                    .filter(
+                        FinancialContact.tenant_id
+                        == current_user.tenant_id,
+
+                        FinancialContact.client_id == cid,
+
+                        FinancialContact.ativo
+                        == True,  # noqa: E712
+                    )
+                    .all()
+                )
+
+            return cache_contatos[cid]
 
         # Lançamentos que já estão vinculados a alguma conciliação não
         # devem ser sugeridos de novo pra outra transação.
@@ -844,23 +936,16 @@ class BankReconciliationService:
             valor_minimo = valor_transacao - tolerancia_valor
             valor_maximo = valor_transacao + tolerancia_valor
 
-            candidatos = (
-                db.query(Model)
-                .filter(
-                    Model.tenant_id
-                    == current_user.tenant_id,
-
-                    Model.client_id
-                    == transaction.client_id,
-
-                    Model.valor
-                    >= valor_minimo,
-
-                    Model.valor
-                    <= valor_maximo,
+            candidatos = [
+                item
+                for item in lancamentos_do_cliente(
+                    Model,
+                    transaction.client_id
                 )
-                .all()
-            )
+                if valor_minimo
+                <= Decimal(str(item.valor))
+                <= valor_maximo
+            ]
 
             avaliados = []
 
@@ -999,7 +1084,11 @@ class BankReconciliationService:
                         db,
                         current_user,
                         transaction,
-                        Model
+                        Model,
+                        historico_do_cliente(
+                            Model,
+                            transaction.client_id
+                        )
                     )
                 )
 
@@ -1010,7 +1099,10 @@ class BankReconciliationService:
                         ._sugerir_contato_por_nome(
                             db,
                             current_user,
-                            transaction
+                            transaction,
+                            contatos_do_cliente(
+                                transaction.client_id
+                            )
                         )
                     )
 
@@ -1032,7 +1124,8 @@ class BankReconciliationService:
         db,
         current_user,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
+        client_id=None
     ):
 
         return (
@@ -1040,7 +1133,8 @@ class BankReconciliationService:
                 db,
                 current_user.tenant_id,
                 skip,
-                limit
+                limit,
+                client_id
             )
         )
 
@@ -1066,6 +1160,127 @@ class BankReconciliationService:
             )
 
         return reconciliation
+
+    @staticmethod
+    def _conciliar_com_rateio(
+        db,
+        current_user,
+        transaction,
+        data,
+        is_credito
+    ):
+        """Concilia uma transação dividindo-a em partes (rateio): um
+        lançamento por parte — todos com o mesmo contato, categoria,
+        subcategoria e competência — e um vínculo de conciliação por
+        parte, tudo numa única operação atômica. A soma das partes tem
+        que fechar exatamente com o valor da transação."""
+
+        centavo = Decimal("0.01")
+
+        partes = [
+            (
+                item.descricao.strip(),
+                Decimal(str(item.valor)).quantize(centavo)
+            )
+            for item in data.rateio
+        ]
+
+        if len(partes) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="O rateio precisa de pelo menos 2 partes"
+            )
+
+        if any(not descricao for descricao, _ in partes):
+            raise HTTPException(
+                status_code=400,
+                detail="Descreva todas as partes do rateio"
+            )
+
+        total_partes = sum(
+            (valor for _, valor in partes),
+            Decimal("0.00")
+        )
+
+        valor_transacao = Decimal(
+            str(transaction.valor)
+        ).quantize(centavo)
+
+        if total_partes != valor_transacao:
+
+            diferenca = valor_transacao - total_partes
+
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "A soma das partes (R$ "
+                    f"{total_partes:.2f}) precisa ser igual ao valor "
+                    f"da transação (R$ {valor_transacao:.2f}) — "
+                    f"{'faltam' if diferenca > 0 else 'sobram'} "
+                    f"R$ {abs(diferenca):.2f}"
+                )
+            )
+
+        primeira = None
+
+        for descricao, valor in partes:
+
+            entry_fields = dict(
+                tenant_id=current_user.tenant_id,
+                client_id=transaction.client_id,
+                financial_contact_id=data.financial_contact_id,
+                category_id=data.category_id,
+                subcategory_id=data.subcategory_id,
+                descricao=descricao,
+                valor=valor,
+                vencimento=transaction.data_transacao,
+                competencia=data.competencia,
+                observacao=data.observacao,
+            )
+
+            if is_credito:
+                entry = AccountsReceivable(
+                    **entry_fields,
+                    status="RECEBIDO",
+                    data_recebimento=transaction.data_transacao,
+                )
+            else:
+                entry = AccountsPayable(
+                    **entry_fields,
+                    status="PAGO",
+                    data_pagamento=transaction.data_transacao,
+                )
+
+            db.add(entry)
+
+            db.flush()
+
+            reconciliation = BankReconciliation(
+                tenant_id=current_user.tenant_id,
+                bank_transaction_id=transaction.id,
+                accounts_payable_id=(
+                    None if is_credito else entry.id
+                ),
+                accounts_receivable_id=(
+                    entry.id if is_credito else None
+                ),
+                valor_conciliado=valor,
+                data_conciliacao=transaction.data_transacao,
+                observacao=descricao,
+            )
+
+            db.add(reconciliation)
+
+            if primeira is None:
+                primeira = reconciliation
+
+        transaction.conciliado = True
+
+        db.commit()
+
+        db.refresh(primeira)
+
+        return primeira
 
     @staticmethod
     def delete_reconciliation(
@@ -1105,6 +1320,27 @@ class BankReconciliationService:
 
         if transaction:
             transaction.conciliado = False
+
+        # Transação rateada tem várias conciliações (uma por parte):
+        # desfazer uma desfaz o rateio inteiro, senão a transação voltaria
+        # a "não conciliada" com partes ainda vinculadas e poderia ser
+        # conciliada de novo em duplicidade.
+        irmas = (
+            db.query(BankReconciliation)
+            .filter(
+                BankReconciliation.tenant_id
+                == current_user.tenant_id,
+
+                BankReconciliation.bank_transaction_id
+                == reconciliation.bank_transaction_id,
+
+                BankReconciliation.id != reconciliation.id,
+            )
+            .all()
+        )
+
+        for irma in irmas:
+            db.delete(irma)
 
         BankReconciliationRepository.delete(
             db,

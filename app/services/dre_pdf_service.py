@@ -118,9 +118,16 @@ class DrePdfService:
             "BANCO_CATEGORIA": "por conta bancária e categoria",
         }.get(dados["modo"], "")
 
+        conta_txt = (
+            f" • Conta {dados['conta_filtro']}"
+            if dados.get("conta_filtro")
+            else ""
+        )
+
         elementos.append(
             Paragraph(
-                f"{dados['cliente_nome']} • Exercício {dados['ano']} • "
+                f"{dados['cliente_nome']} • Exercício {dados['ano']}"
+                f"{conta_txt} • "
                 f"Visão {modo_label} • Gerado em "
                 f"{datetime.now().strftime('%d/%m/%Y')}",
                 subtitulo_style,

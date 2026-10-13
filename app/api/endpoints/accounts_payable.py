@@ -1,6 +1,9 @@
+import uuid
+
 from fastapi import (
     APIRouter,
-    Depends
+    Depends,
+    Query
 )
 
 from sqlalchemy.orm import Session
@@ -55,7 +58,8 @@ def create_payable(
 )
 def get_payables(
     skip: int = 0,
-    limit: int = 100,
+    limit: int = Query(100, ge=1, le=5000),
+    client_id: uuid.UUID | None = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ):
@@ -64,7 +68,8 @@ def get_payables(
         db,
         current_user,
         skip,
-        limit
+        limit,
+        client_id
     )
 
 

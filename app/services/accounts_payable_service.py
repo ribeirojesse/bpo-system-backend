@@ -20,6 +20,8 @@ from app.repositories.accounts_payable_repository import (
     AccountsPayableRepository
 )
 
+from app.services.dre_service import DreService
+
 
 class AccountsPayableService:
 
@@ -105,15 +107,31 @@ class AccountsPayableService:
         db,
         current_user,
         skip: int = 0,
-        limit: int = 100
+        limit: int = 100,
+        client_id=None
     ):
 
-        return AccountsPayableRepository.get_all(
+        payables = AccountsPayableRepository.get_all(
             db,
             current_user.tenant_id,
             skip,
-            limit
+            limit,
+            client_id
         )
+
+        # Banco de cada conta = o da transação do extrato conciliada com
+        # ela (usado pelo filtro por banco da tela).
+        bancos = DreService._mapa_banco_por_lancamento(
+            db,
+            current_user.tenant_id,
+            [p.id for p in payables],
+            "accounts_payable_id",
+        )
+
+        for p in payables:
+            p.bank_account_id = bancos.get(p.id)
+
+        return payables
 
     @staticmethod
     def get_payable(

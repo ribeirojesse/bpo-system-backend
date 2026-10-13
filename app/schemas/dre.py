@@ -122,6 +122,11 @@ class LancamentosExcelRequestSchema(BaseModel):
 
     data_fim: date
 
+    # Opcional: limita a planilha aos lançamentos conciliados com essa
+    # conta bancária (o banco de um lançamento vem do vínculo de
+    # conciliação com a transação do extrato).
+    bank_account_id: Optional[uuid.UUID] = None
+
 
 class DreLinhaSchema(BaseModel):
 
@@ -167,3 +172,6 @@ class DreResultadoSchema(BaseModel):
     resultado_anual: Decimal
 
     cor_destaque: Optional[str] = None
+
+    # Nome da conta bancária quando o relatório foi filtrado por uma.
+    conta_filtro: Optional[str] = None

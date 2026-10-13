@@ -20,7 +20,23 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _tem_coluna(nome):
+    """Alguns bancos (ex.: o de desenvolvimento) já receberam esta coluna
+    à mão antes da migration existir — nesse caso não há nada a fazer."""
+
+    inspector = sa.inspect(op.get_bind())
+
+    return nome in {
+        coluna["name"]
+        for coluna in inspector.get_columns('bank_transactions')
+    }
+
+
 def upgrade():
+
+    if _tem_coluna('processado'):
+        return
+
     op.add_column(
         'bank_transactions',
         sa.Column(
@@ -33,6 +49,10 @@ def upgrade():
 
 
 def downgrade():
+
+    if not _tem_coluna('processado'):
+        return
+
     op.drop_column(
         'bank_transactions',
         'processado'

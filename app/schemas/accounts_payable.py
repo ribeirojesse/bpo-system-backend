@@ -94,5 +94,9 @@ class AccountsPayableResponseSchema(BaseModel):
 
     observacao: Optional[str]
 
+    # Conta bancária do lançamento, derivada da conciliação com o extrato
+    # (nulo = ainda não conciliado). Preenchido apenas na listagem.
+    bank_account_id: Optional[uuid.UUID] = None
+
     class Config:
         from_attributes = True
