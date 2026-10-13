@@ -67,6 +67,32 @@ class BankReconciliationRepository:
         )
 
     @staticmethod
+    def mapa_por_lancamento(db, tenant_id, ids, campo_fk):
+        """Devolve {lancamento_id: reconciliation_id} pros ids
+        informados. Usado pelas telas de Contas a Pagar/Receber pra saber
+        quais linhas vieram de uma conciliação (e poder devolvê-las pra
+        tela de Conciliação)."""
+
+        if not ids:
+            return {}
+
+        campo = getattr(BankReconciliation, campo_fk)
+
+        linhas = (
+            db.query(campo, BankReconciliation.id)
+            .filter(
+                BankReconciliation.tenant_id == tenant_id,
+                campo.in_(ids),
+            )
+            .all()
+        )
+
+        return {
+            lancamento_id: reconciliation_id
+            for lancamento_id, reconciliation_id in linhas
+        }
+
+    @staticmethod
     def get_by_id(
         db: Session,
         tenant_id,

@@ -1180,10 +1180,36 @@ class BankReconciliationService:
         partes = [
             (
                 item.descricao.strip(),
-                Decimal(str(item.valor)).quantize(centavo)
+                Decimal(str(item.valor)).quantize(centavo),
+                item.financial_contact_id or data.financial_contact_id
             )
             for item in data.rateio
         ]
+
+        contatos_ids = {
+            contato_id for _, _, contato_id in partes
+        }
+
+        contatos_validos = {
+            row[0]
+            for row in (
+                db.query(FinancialContact.id)
+                .filter(
+                    FinancialContact.id.in_(contatos_ids),
+                    FinancialContact.tenant_id
+                    == current_user.tenant_id,
+                    FinancialContact.client_id
+                    == transaction.client_id
+                )
+                .all()
+            )
+        }
+
+        if contatos_ids - contatos_validos:
+            raise HTTPException(
+                status_code=400,
+                detail="Fornecedor inválido em uma das partes do rateio"
+            )
 
         if len(partes) < 2:
             raise HTTPException(
@@ -1191,14 +1217,14 @@ class BankReconciliationService:
                 detail="O rateio precisa de pelo menos 2 partes"
             )
 
-        if any(not descricao for descricao, _ in partes):
+        if any(not descricao for descricao, _, _ in partes):
             raise HTTPException(
                 status_code=400,
                 detail="Descreva todas as partes do rateio"
             )
 
         total_partes = sum(
-            (valor for _, valor in partes),
+            (valor for _, valor, _ in partes),
             Decimal("0.00")
         )
 
@@ -1223,12 +1249,12 @@ class BankReconciliationService:
 
         primeira = None
 
-        for descricao, valor in partes:
+        for descricao, valor, contato_id in partes:
 
             entry_fields = dict(
                 tenant_id=current_user.tenant_id,
                 client_id=transaction.client_id,
-                financial_contact_id=data.financial_contact_id,
+                financial_contact_id=contato_id,
                 category_id=data.category_id,
                 subcategory_id=data.subcategory_id,
                 descricao=descricao,
@@ -1286,7 +1312,8 @@ class BankReconciliationService:
     def delete_reconciliation(
         db,
         current_user,
-        reconciliation_id
+        reconciliation_id,
+        reabrir_lancamento=False
     ):
         """Desfaz uma conciliação: remove só o VÍNCULO com o extrato
         bancário, marcando a transação como não conciliada de novo (ela
@@ -1302,7 +1329,13 @@ class BankReconciliationService:
         de "confirmar pagamento" que a rodada 1 tinha eliminado: o
         lançamento virava ATRASADO se o vencimento já tivesse passado, e
         aparecia de novo o botão de marcar como pago manualmente — só que
-        agora em Contas a Pagar/Receber, em vez de na Conciliação."""
+        agora em Contas a Pagar/Receber, em vez de na Conciliação.
+
+        Com `reabrir_lancamento=True` (botão "Devolver para conciliação"
+        das telas de Contas a Pagar/Receber) o lançamento TAMBÉM volta a
+        PENDENTE, sem data de pagamento/recebimento — a situação fica
+        exatamente como antes da conciliação. Numa transação rateada isso
+        vale pra todas as partes."""
 
         reconciliation = (
             BankReconciliationService.get_reconciliation(
@@ -1339,6 +1372,14 @@ class BankReconciliationService:
             .all()
         )
 
+        if reabrir_lancamento:
+            for item in [reconciliation, *irmas]:
+                BankReconciliationService._reabrir_lancamento(
+                    db,
+                    current_user,
+                    item
+                )
+
         for irma in irmas:
             db.delete(irma)
 
@@ -1347,6 +1388,15 @@ class BankReconciliationService:
             reconciliation
         )
 
+        if reabrir_lancamento:
+            return {
+                "message": (
+                    "Conciliação desfeita — a transação voltou "
+                    "para \"não conciliado\" e o lançamento "
+                    "voltou a PENDENTE"
+                )
+            }
+
         return {
             "message": (
                 "Conciliação desfeita — a transação "
@@ -1354,3 +1404,121 @@ class BankReconciliationService:
                 "de Conciliação"
             )
         }
+
+    @staticmethod
+    def desfazer_em_lote(
+        db,
+        current_user,
+        reconciliation_ids,
+        reabrir_lancamento=True
+    ):
+        """Desfaz várias conciliações de uma vez (botão "Devolver para
+        conciliação" da seleção múltipla em Contas a Pagar/Receber).
+
+        Faz o que dá e devolve o resto em "recusadas" com o motivo — um
+        id que não existe no meio da seleção não impede os outros. Tudo
+        numa transação só de banco: ou grava o lote inteiro, ou nada.
+
+        Transação rateada entra inteira: se uma parte foi selecionada, as
+        irmãs vão junto, senão a transação voltaria pra fila com partes
+        ainda vinculadas."""
+
+        encontradas = (
+            db.query(BankReconciliation)
+            .filter(
+                BankReconciliation.tenant_id
+                == current_user.tenant_id,
+
+                BankReconciliation.id.in_(reconciliation_ids),
+            )
+            .all()
+        )
+
+        achadas = {item.id for item in encontradas}
+
+        recusadas = [
+            {
+                "id": item_id,
+                "motivo": "Conciliação não encontrada",
+            }
+            for item_id in reconciliation_ids
+            if item_id not in achadas
+        ]
+
+        transacao_ids = {
+            item.bank_transaction_id
+            for item in encontradas
+        }
+
+        # Irmãs do rateio: todas as conciliações das transações tocadas.
+        alvos = (
+            db.query(BankReconciliation)
+            .filter(
+                BankReconciliation.tenant_id
+                == current_user.tenant_id,
+
+                BankReconciliation.bank_transaction_id.in_(
+                    transacao_ids
+                ),
+            )
+            .all()
+        ) if transacao_ids else []
+
+        for transacao_id in transacao_ids:
+
+            transaction = BankTransactionRepository.get_by_id(
+                db,
+                current_user.tenant_id,
+                transacao_id
+            )
+
+            if transaction:
+                transaction.conciliado = False
+
+        for item in alvos:
+
+            if reabrir_lancamento:
+                BankReconciliationService._reabrir_lancamento(
+                    db,
+                    current_user,
+                    item
+                )
+
+            db.delete(item)
+
+        db.commit()
+
+        return {
+            "processadas": len(alvos),
+            "transacoes": len(transacao_ids),
+            "recusadas": recusadas,
+        }
+
+    @staticmethod
+    def _reabrir_lancamento(db, current_user, reconciliation):
+        """Volta a conta a pagar/receber da conciliação pra PENDENTE,
+        limpando a data de pagamento/recebimento."""
+
+        if reconciliation.accounts_payable_id:
+
+            payable = AccountsPayableRepository.get_by_id(
+                db,
+                current_user.tenant_id,
+                reconciliation.accounts_payable_id
+            )
+
+            if payable:
+                payable.status = "PENDENTE"
+                payable.data_pagamento = None
+
+        if reconciliation.accounts_receivable_id:
+
+            receivable = AccountsReceivableRepository.get_by_id(
+                db,
+                current_user.tenant_id,
+                reconciliation.accounts_receivable_id
+            )
+
+            if receivable:
+                receivable.status = "PENDENTE"
+                receivable.data_recebimento = None

@@ -20,6 +20,10 @@ from app.repositories.accounts_receivable_repository import (
     AccountsReceivableRepository
 )
 
+from app.repositories.bank_reconciliation_repository import (
+    BankReconciliationRepository
+)
+
 from app.services.dre_service import DreService
 
 
@@ -130,6 +134,20 @@ class AccountsReceivableService:
 
         for r in receivables:
             r.bank_account_id = bancos.get(r.id)
+
+        # Conciliação de origem de cada lançamento (pra devolver pra
+        # tela de Conciliação).
+        conciliacoes = (
+            BankReconciliationRepository.mapa_por_lancamento(
+                db,
+                current_user.tenant_id,
+                [r.id for r in receivables],
+                "accounts_receivable_id",
+            )
+        )
+
+        for r in receivables:
+            r.reconciliation_id = conciliacoes.get(r.id)
 
         return receivables
 

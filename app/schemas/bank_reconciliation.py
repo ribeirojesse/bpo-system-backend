@@ -16,6 +16,10 @@ class RateioItemSchema(BaseModel):
 
     valor: Decimal = Field(gt=0, le=Decimal("9999999999.99"))
 
+    # Opcional: fornecedor só desta parte. Sem ele, vale o fornecedor
+    # principal da conciliação.
+    financial_contact_id: Optional[uuid.UUID] = None
+
 
 class BankReconciliationFromTransactionSchema(BaseModel):
     """Concilia uma transação bancária criando, no mesmo passo, o
@@ -192,3 +196,36 @@ class AISuggestionGenerateResponseSchema(BaseModel):
     restantes: int
 
     sugestoes: list[AISuggestionSchema]
+
+
+class ReconciliationBulkUndoSchema(BaseModel):
+    """Devolve vários lançamentos pra tela de Conciliação de uma vez
+    (seleção múltipla em Contas a Pagar/Receber)."""
+
+    reconciliation_ids: list[uuid.UUID] = Field(
+        min_length=1,
+        max_length=1000
+    )
+
+    # true (padrão) = o lançamento também volta a PENDENTE, perdendo a
+    # data de pagamento/recebimento; a competência é mantida.
+    reabrir_lancamento: bool = True
+
+
+class ReconciliationBulkRecusadaSchema(BaseModel):
+
+    id: uuid.UUID
+
+    motivo: str
+
+
+class ReconciliationBulkUndoResultSchema(BaseModel):
+
+    # Vínculos desfeitos (pode ser maior que o número de ids enviados:
+    # devolver uma parte de um rateio devolve o rateio inteiro).
+    processadas: int
+
+    # Transações que voltaram pra fila da Conciliação.
+    transacoes: int
+
+    recusadas: list[ReconciliationBulkRecusadaSchema] = []

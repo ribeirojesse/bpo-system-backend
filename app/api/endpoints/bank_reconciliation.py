@@ -25,7 +25,9 @@ from app.schemas.bank_reconciliation import (
     ReconciliationSuggestionSchema,
     AISuggestionListSchema,
     AISuggestionGenerateSchema,
-    AISuggestionGenerateResponseSchema
+    AISuggestionGenerateResponseSchema,
+    ReconciliationBulkUndoSchema,
+    ReconciliationBulkUndoResultSchema
 )
 
 from app.services.bank_reconciliation_service import (
@@ -223,9 +225,33 @@ def get_reconciliation(
     )
 
 
+@router.post(
+    "/bulk-undo",
+    response_model=ReconciliationBulkUndoResultSchema
+)
+def bulk_undo(
+    data: ReconciliationBulkUndoSchema,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role("ADMIN"))
+):
+    """Devolve vários lançamentos pra tela de Conciliação de uma vez."""
+
+    return BankReconciliationService.desfazer_em_lote(
+        db,
+        current_user,
+        data.reconciliation_ids,
+        data.reabrir_lancamento
+    )
+
+
 @router.delete("/{reconciliation_id}")
 def delete_reconciliation(
     reconciliation_id: str,
+    # true = devolver pra conciliação reabrindo o lançamento como
+    # PENDENTE (botão das telas de Contas a Pagar/Receber); false =
+    # só desfazer o vínculo, mantendo o lançamento pago (botão
+    # "Desfazer" do histórico de conciliações).
+    reabrir_lancamento: bool = False,
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("ADMIN"))
 ):
@@ -234,6 +260,7 @@ def delete_reconciliation(
         BankReconciliationService.delete_reconciliation(
             db,
             current_user,
-            reconciliation_id
+            reconciliation_id,
+            reabrir_lancamento
         )
     )

@@ -20,6 +20,10 @@ from app.repositories.accounts_payable_repository import (
     AccountsPayableRepository
 )
 
+from app.repositories.bank_reconciliation_repository import (
+    BankReconciliationRepository
+)
+
 from app.services.dre_service import DreService
 
 
@@ -130,6 +134,20 @@ class AccountsPayableService:
 
         for p in payables:
             p.bank_account_id = bancos.get(p.id)
+
+        # Conciliação de origem de cada lançamento (pra devolver pra
+        # tela de Conciliação).
+        conciliacoes = (
+            BankReconciliationRepository.mapa_por_lancamento(
+                db,
+                current_user.tenant_id,
+                [p.id for p in payables],
+                "accounts_payable_id",
+            )
+        )
+
+        for p in payables:
+            p.reconciliation_id = conciliacoes.get(p.id)
 
         return payables
 

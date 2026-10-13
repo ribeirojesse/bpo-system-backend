@@ -92,5 +92,9 @@ class AccountsReceivableResponseSchema(BaseModel):
     # (nulo = ainda não conciliado). Preenchido apenas na listagem.
     bank_account_id: Optional[uuid.UUID] = None
 
+    # Conciliação de origem (nulo = lançamento criado à mão). Permite
+    # devolver a linha pra tela de Conciliação. Só na listagem.
+    reconciliation_id: Optional[uuid.UUID] = None
+
     class Config:
         from_attributes = True
