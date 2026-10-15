@@ -216,6 +216,41 @@ class DreService:
         return f"{conta.banco} • {conta.conta}"
 
     @staticmethod
+    def _indices_meses(meses):
+        """Converte os meses pedidos (1 a 12) nos índices das colunas.
+        Devolve None quando não há recorte a fazer (nulo, vazio ou os 12
+        meses) — aí o relatório sai com o exercício inteiro."""
+
+        if not meses:
+            return None
+
+        indices = sorted({
+            int(mes) - 1
+            for mes in meses
+            if isinstance(mes, int) and 1 <= int(mes) <= 12
+        })
+
+        if not indices or len(indices) == 12:
+            return None
+
+        return indices
+
+    @staticmethod
+    def _recortar_linha(linha, indices):
+
+        valores = [linha["valores_mensais"][i] for i in indices]
+
+        return {
+            **linha,
+            "valores_mensais": valores,
+            "total": sum(valores),
+            "subcategorias": [
+                DreService._recortar_linha(sub, indices)
+                for sub in linha.get("subcategorias", [])
+            ],
+        }
+
+    @staticmethod
     def _data_efetiva(item, campo_pagamento):
 
         return getattr(item, campo_pagamento) or item.vencimento
@@ -525,11 +560,42 @@ class DreService:
             totais_receita[m] - totais_despesa[m] for m in range(12)
         ]
 
+        meses_labels = MESES
+
+        meses_filtro = None
+
+        indices = DreService._indices_meses(
+            getattr(params, "meses", None)
+        )
+
+        if indices is not None:
+
+            meses_labels = [MESES[i] for i in indices]
+
+            meses_filtro = ", ".join(meses_labels)
+
+            linhas_receita = [
+                DreService._recortar_linha(linha, indices)
+                for linha in linhas_receita
+            ]
+
+            linhas_despesa = [
+                DreService._recortar_linha(linha, indices)
+                for linha in linhas_despesa
+            ]
+
+            totais_receita = [totais_receita[i] for i in indices]
+
+            totais_despesa = [totais_despesa[i] for i in indices]
+
+            totais_resultado = [totais_resultado[i] for i in indices]
+
         return {
             "cliente_nome": client.nome_fantasia or client.razao_social,
             "ano": params.ano,
             "modo": params.modo,
-            "meses": MESES,
+            "meses": meses_labels,
+            "meses_filtro": meses_filtro,
             "linhas_receita": linhas_receita,
             "linhas_despesa": linhas_despesa,
             "totais_receita": totais_receita,

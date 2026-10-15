@@ -124,10 +124,16 @@ class DrePdfService:
             else ""
         )
 
+        meses_txt = (
+            f" • Meses {dados['meses_filtro']}"
+            if dados.get("meses_filtro")
+            else ""
+        )
+
         elementos.append(
             Paragraph(
                 f"{dados['cliente_nome']} • Exercício {dados['ano']}"
-                f"{conta_txt} • "
+                f"{conta_txt}{meses_txt} • "
                 f"Visão {modo_label} • Gerado em "
                 f"{datetime.now().strftime('%d/%m/%Y')}",
                 subtitulo_style,

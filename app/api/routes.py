@@ -13,6 +13,7 @@ from app.api.endpoints import (
                                 ofx_import,
                                 payroll,
                                 payroll_batch,
+                                card_invoice,
                                 admin_user,
                                 portal,
                                 dre,
@@ -108,6 +109,17 @@ api_router.include_router(
     prefix="/payroll",
     tags=["Payroll"]
 )
+
+# Conciliação de fatura de cartão de crédito: lê a fatura (PDF/imagem),
+# confere a soma com o pagamento que saiu no extrato e grava um
+# lançamento por item na categoria FATURA CARTAO (ver
+# app/services/card_invoice_service.py).
+api_router.include_router(
+    card_invoice.router,
+    prefix="/card-invoices",
+    tags=["Fatura de Cartão"]
+)
+
 
 # Portal do CLIENTE — só-leitura, escopado a um único client
 # (ver app/api/endpoints/portal.py e app/services/portal_service.py).

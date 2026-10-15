@@ -6,7 +6,7 @@ from datetime import date
 
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 ModoDre = Literal["CATEGORIA", "BANCO", "BANCO_CATEGORIA"]
@@ -110,6 +110,16 @@ class DreGerarRequestSchema(BaseModel):
     # agrupamento nos modos BANCO/BANCO_CATEGORIA.
     bank_account_id: Optional[uuid.UUID] = None
 
+    # Meses a incluir (1 = janeiro ... 12 = dezembro). Nulo ou os 12
+    # meses = exercício inteiro. Usado pela exportação em PDF, que
+    # precisa sair com os mesmos meses marcados na tela; os totais são
+    # recalculados só com os meses escolhidos.
+    meses: Optional[list[int]] = Field(
+        default=None,
+        min_length=1,
+        max_length=12
+    )
+
 
 class LancamentosExcelRequestSchema(BaseModel):
     """Exportação dos lançamentos em Excel: o único filtro é o período
@@ -154,6 +164,10 @@ class DreResultadoSchema(BaseModel):
     modo: ModoDre
 
     meses: list[str]
+
+    # Texto dos meses quando o relatório foi recortado ("jan, fev") —
+    # nulo no exercício inteiro. O PDF usa no subtítulo.
+    meses_filtro: Optional[str] = None
 
     linhas_receita: list[DreLinhaSchema]
 
