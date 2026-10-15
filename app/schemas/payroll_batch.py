@@ -1,3 +1,5 @@
+from datetime import date
+
 from decimal import Decimal
 
 from pydantic import BaseModel
@@ -41,6 +43,12 @@ class PayrollBatchResponseSchema(
     valor_transacao: Decimal
 
     conciliado: bool
+
+    # Conta bancária de onde a folha saiu e a data do débito, vindas da
+    # transação do extrato que originou o lote (preenchidas no serviço).
+    conta_nome: str | None = None
+
+    data_transacao: date | None = None
 
     items: list[
         PayrollItemResponseSchema

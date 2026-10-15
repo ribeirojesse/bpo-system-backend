@@ -7,6 +7,8 @@ from app.models.financial_contact import FinancialContact
 from app.models.expense_category import ExpenseCategory
 from app.models.expense_subcategory import ExpenseSubcategory
 
+from app.services.dre_service import DreService
+
 
 # Todas as consultas aqui são escopadas por current_user.client_id — NUNCA
 # por tenant_id. O portal do CLIENTE só pode ver o que pertence ao único
@@ -253,6 +255,30 @@ class PortalService:
             ).all()
         } if category_ids else {}
 
+        # Conta de cada lançamento: conciliação com o extrato ou lote de
+        # folha/fatura de cartão. É o que faz o salário aparecer aqui com
+        # a conta de onde saiu.
+        contas = {
+            c.id: f"{c.banco} • {c.conta}"
+            for c in db.query(BankAccount).filter(
+                BankAccount.client_id == client_id
+            ).all()
+        }
+
+        banco_por_payable = DreService._mapa_banco_por_lancamento(
+            db,
+            current_user.tenant_id,
+            [p.id for p in payables],
+            "accounts_payable_id",
+        )
+
+        banco_por_receivable = DreService._mapa_banco_por_lancamento(
+            db,
+            current_user.tenant_id,
+            [r.id for r in receivables],
+            "accounts_receivable_id",
+        )
+
         lancamentos = []
 
         for p in payables:
@@ -267,6 +293,9 @@ class PortalService:
                 "status": p.status,
                 "fornecedor_nome": contacts.get(p.financial_contact_id),
                 "categoria_nome": categories.get(p.category_id),
+                "conta_nome": contas.get(
+                    banco_por_payable.get(p.id)
+                ),
             })
 
         for r in receivables:
@@ -281,6 +310,9 @@ class PortalService:
                 "status": r.status,
                 "fornecedor_nome": contacts.get(r.financial_contact_id),
                 "categoria_nome": categories.get(r.category_id),
+                "conta_nome": contas.get(
+                    banco_por_receivable.get(r.id)
+                ),
             })
 
         lancamentos.sort(

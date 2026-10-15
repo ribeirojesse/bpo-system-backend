@@ -19,6 +19,10 @@ from app.models.expense_subcategory import ExpenseSubcategory
 from app.models.bank_account import BankAccount
 from app.models.bank_transaction import BankTransaction
 from app.models.bank_reconciliation import BankReconciliation
+from app.models.card_invoice_batch import CardInvoiceBatch
+from app.models.card_invoice_item import CardInvoiceItem
+from app.models.payroll_batch import PayrollBatch
+from app.models.payroll_item import PayrollItem
 from app.models.financial_contact import FinancialContact
 
 
@@ -284,10 +288,52 @@ class DreService:
             .all()
         )
 
-        return {
+        mapa = {
             lancamento_id: bank_account_id
             for lancamento_id, bank_account_id in linhas
         }
+
+        # Folha de pagamento e fatura de cartão não criam vínculo de
+        # conciliação: a ligação com a transação do extrato fica no lote
+        # (PayrollBatch/CardInvoiceBatch). Sem olhar pros lotes, salário
+        # e compras do cartão ficariam sem banco — fora do filtro por
+        # conta das telas e no grupo "Sem conta vinculada" do DRE.
+        if campo_fk == "accounts_payable_id":
+
+            for Item, Lote in (
+                (PayrollItem, PayrollBatch),
+                (CardInvoiceItem, CardInvoiceBatch),
+            ):
+
+                do_lote = (
+                    db.query(
+                        Item.accounts_payable_id,
+                        BankTransaction.bank_account_id,
+                    )
+                    .join(
+                        Lote,
+                        Lote.id == Item.batch_id
+                    )
+                    .join(
+                        BankTransaction,
+                        BankTransaction.id
+                        == Lote.bank_transaction_id
+                    )
+                    .filter(
+                        Lote.tenant_id == tenant_id,
+                        Item.accounts_payable_id.in_(ids),
+                    )
+                    .all()
+                )
+
+                for lancamento_id, bank_account_id in do_lote:
+
+                    if lancamento_id is None:
+                        continue
+
+                    mapa.setdefault(lancamento_id, bank_account_id)
+
+        return mapa
 
     @staticmethod
     def gerar(db, current_user, params):

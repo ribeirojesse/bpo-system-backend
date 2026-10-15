@@ -1,6 +1,7 @@
 from fastapi import (
     APIRouter,
-    Depends
+    Depends,
+    Query
 )
 
 from sqlalchemy.orm import Session
@@ -50,7 +51,10 @@ def get_dashboard(
 )
 def get_lancamentos(
     skip: int = 0,
-    limit: int = 100,
+    # O teto de 100 escondia lançamentos de quem tem muito volume: uma
+    # folha com dezenas de funcionários enchia a página e empurrava o
+    # resto pra fora da lista (foi o que fez "salários" não aparecer).
+    limit: int = Query(100, ge=1, le=5000),
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role("CLIENTE"))
 ):

@@ -111,6 +111,12 @@ class PortalLancamentoSchema(BaseModel):
 
     categoria_nome: Optional[str] = None
 
+    # Conta bancária em que o lançamento foi liquidado — vem da
+    # conciliação com o extrato ou do lote de folha/fatura de cartão
+    # (ver DreService._mapa_banco_por_lancamento). Nulo em lançamento
+    # ainda não conciliado.
+    conta_nome: Optional[str] = None
+
 
 class PortalBreakdownItemSchema(BaseModel):
 
