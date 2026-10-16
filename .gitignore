@@ -62,3 +62,6 @@ docker-compose.override.yml
 
 # Firebase
 .firebase/
+
+# Planilhas de importação de dados de cliente (nunca versionar)
+import/
