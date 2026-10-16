@@ -44,6 +44,7 @@ import unicodedata
 
 from datetime import datetime
 from decimal import Decimal, InvalidOperation
+from uuid import UUID
 
 # Rodando como "python scripts/importar_legado.py", o Python coloca
 # scripts/ no sys.path — não a raiz do projeto —, então "app" não seria
