@@ -16,10 +16,12 @@ tabelas dinâmicas funcionam direto.
 """
 
 import io
+import os
 import re
 import unicodedata
 
 from openpyxl import Workbook
+from openpyxl.drawing.image import Image as ExcelImage
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
@@ -42,6 +44,18 @@ _COLUNAS = [
 ]
 
 _FORMATO_MOEDA = '"R$" #,##0.00'
+
+# Identidade Tower (preto/grafite), a mesma do PDF do DRE.
+_COR_TOWER = "000000"
+_COR_GRAFITE = "3A3A3A"
+
+_MARCA_TOWER = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "assets",
+    "tower-marca.png",
+)
+
+_ASSINATURA_TOWER = "Tower — BPO e Consultoria Financeira · towerbpo.com"
 
 # Paleta "Notion" usada também no PDF do DRE (dre_pdf_service.py).
 _COR_TEXTO = "37352F"
@@ -75,19 +89,45 @@ def gerar(dados) -> bytes:
 
     lancamentos = dados["lancamentos"]
 
-    # ---------------- título ----------------
-    ws["A1"] = f"Lançamentos — {dados['cliente_nome']}"
-    ws["A1"].font = Font(bold=True, size=14, color=_COR_TEXTO)
+    # ---------------- marca e título ----------------
+    # A marca da Tower fica flutuando sobre as primeiras linhas; o nome
+    # do cliente é o título da planilha, em caixa alta e grande.
+    if os.path.exists(_MARCA_TOWER):
 
-    ws["A2"] = (
-        f"Período: {dados['data_inicio']:%d/%m/%Y} "
-        f"a {dados['data_fim']:%d/%m/%Y}"
+        try:
+            marca = ExcelImage(_MARCA_TOWER)
+
+            # 137x168 no arquivo — reduz mantendo a proporção.
+            marca.height = 46
+            marca.width = 37
+
+            ws.add_image(marca, "A1")
+
+        except Exception:
+            # Planilha sem logo é melhor que exportação quebrada.
+            pass
+
+    ws.column_dimensions["A"].width = 12
+
+    ws["B1"] = (dados["cliente_nome"] or "").upper()
+    ws["B1"].font = Font(bold=True, size=18, color=_COR_TOWER)
+    ws["B1"].alignment = Alignment(vertical="center")
+    ws.row_dimensions[1].height = 26
+
+    ws["B2"] = (
+        "Lançamentos · Período "
+        f"{dados['data_inicio']:%d/%m/%Y} a "
+        f"{dados['data_fim']:%d/%m/%Y}"
+        + (
+            f" · Conta {dados['conta_filtro']}"
+            if dados.get("conta_filtro")
+            else ""
+        )
     )
-    ws["A2"].font = Font(size=11, color=_COR_TEXTO)
+    ws["B2"].font = Font(size=11, color=_COR_GRAFITE)
 
-    if dados.get("conta_filtro"):
-        ws["A3"] = f"Conta bancária: {dados['conta_filtro']}"
-        ws["A3"].font = Font(size=11, color=_COR_TEXTO)
+    ws["B3"] = _ASSINATURA_TOWER
+    ws["B3"].font = Font(size=9, bold=True, color=_COR_GRAFITE)
 
     # ---------------- resumo (fórmulas) ----------------
     primeira = _LINHA_CABECALHO + 1
@@ -123,7 +163,7 @@ def gerar(dados) -> bytes:
 
     # ---------------- cabeçalho da tabela ----------------
     borda = Border(bottom=Side(style="thin", color=_COR_BORDA))
-    fundo_cabecalho = PatternFill("solid", fgColor=_COR_TEXTO)
+    fundo_cabecalho = PatternFill("solid", fgColor=_COR_TOWER)
     fundo_zebra = PatternFill("solid", fgColor=_COR_ZEBRA)
 
     for idx, (titulo, _chave, largura, _fmt) in enumerate(_COLUNAS, start=1):
@@ -197,6 +237,14 @@ def gerar(dados) -> bytes:
     ws.page_setup.fitToHeight = 0
     ws.sheet_properties.pageSetUpPr.fitToPage = True
     ws.print_title_rows = f"{_LINHA_CABECALHO}:{_LINHA_CABECALHO}"
+
+    # Assinatura também na impressão.
+    ws.oddFooter.left.text = _ASSINATURA_TOWER
+    ws.oddFooter.left.size = 8
+    ws.oddFooter.left.color = "5E5E5E"
+    ws.oddFooter.right.text = "Página &P de &N"
+    ws.oddFooter.right.size = 8
+    ws.oddFooter.right.color = "5E5E5E"
 
     buffer = io.BytesIO()
     wb.save(buffer)

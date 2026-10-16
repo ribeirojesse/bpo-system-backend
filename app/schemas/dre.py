@@ -120,6 +120,10 @@ class DreGerarRequestSchema(BaseModel):
         max_length=12
     )
 
+    # true = o PDF sai com as subcategorias detalhadas embaixo de cada
+    # categoria, como o toggle "Mostrar subcategorias" da tela.
+    subcategorias: bool = False
+
 
 class LancamentosExcelRequestSchema(BaseModel):
     """Exportação dos lançamentos em Excel: o único filtro é o período
@@ -168,6 +172,10 @@ class DreResultadoSchema(BaseModel):
     # Texto dos meses quando o relatório foi recortado ("jan, fev") —
     # nulo no exercício inteiro. O PDF usa no subtítulo.
     meses_filtro: Optional[str] = None
+
+    # Ecoa o pedido de detalhar subcategorias (o PDF usa; a tela tem o
+    # próprio toggle).
+    mostrar_subcategorias: bool = False
 
     linhas_receita: list[DreLinhaSchema]
 

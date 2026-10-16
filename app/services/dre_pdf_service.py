@@ -1,9 +1,12 @@
 import io
+import os
 
 from datetime import datetime
 
 from reportlab.platypus import (
     SimpleDocTemplate,
+    Image,
+    KeepTogether,
     Table,
     TableStyle,
     Paragraph,
@@ -22,13 +25,30 @@ from reportlab.lib.enums import TA_LEFT
 # usada com moderação — nunca blocos de cor saturada cobrindo a tabela
 # inteira, ao contrário dos modelos de referência que inspiraram este
 # relatório.
+# Identidade Tower: preto, branco e grafite (ver landing.css). O nome do
+# cliente é o título do documento — o relatório é dele, a Tower assina no
+# topo e no rodapé.
+TOWER_TINTA = colors.HexColor("#000000")
+TOWER_GRAFITE = colors.HexColor("#3a3a3a")
+TOWER_FUMACA = colors.HexColor("#5e5e5e")
+
+MARCA_TOWER = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "assets",
+    "tower-marca.png",
+)
+
+ASSINATURA_TOWER = (
+    "Tower — BPO e Consultoria Financeira · towerbpo.com"
+)
+
 CINZA_TEXTO = colors.HexColor("#37352f")
 CINZA_CLARO = colors.HexColor("#9b9a97")
 LINHA = colors.HexColor("#e9e9e7")
 FUNDO_ALT = colors.HexColor("#f7f6f5")
 VERDE = colors.HexColor("#0f7b6c")
 VERMELHO = colors.HexColor("#e03e3e")
-COR_PADRAO = "#4f46e5"
+COR_PADRAO = "#111111"
 
 
 def brl(valor):
@@ -76,19 +96,23 @@ class DrePdfService:
         titulo_style = ParagraphStyle(
             "DreTitulo",
             parent=styles["Title"],
-            textColor=CINZA_TEXTO,
+            textColor=TOWER_TINTA,
             fontName="Helvetica-Bold",
-            fontSize=22,
-            leading=26,
+            fontSize=26,
+            leading=30,
             alignment=TA_LEFT,
+            # Caixa alta com leve tracking lembra o Archivo Black da
+            # identidade sem precisar embarcar a fonte no servidor.
+            trackingAmount=0.6,
         )
 
         subtitulo_style = ParagraphStyle(
             "DreSubtitulo",
             parent=styles["Normal"],
-            textColor=CINZA_CLARO,
+            textColor=TOWER_FUMACA,
             fontName="Helvetica",
-            fontSize=11,
+            fontSize=10.5,
+            leading=14,
         )
 
         secao_style = ParagraphStyle(
@@ -106,9 +130,17 @@ class DrePdfService:
         elementos = []
 
         elementos.append(
+            DrePdfService._cabecalho_marca(largura)
+        )
+
+        elementos.append(Spacer(1, 10))
+
+        # O nome do cliente é o título: quem abre o PDF vê primeiro o
+        # próprio nome, não o nome do relatório.
+        elementos.append(
             Paragraph(
-                "Demonstração de Resultado (DRE)",
-                titulo_style
+                (dados["cliente_nome"] or "").upper(),
+                titulo_style,
             )
         )
 
@@ -119,22 +151,22 @@ class DrePdfService:
         }.get(dados["modo"], "")
 
         conta_txt = (
-            f" • Conta {dados['conta_filtro']}"
+            f" · Conta {dados['conta_filtro']}"
             if dados.get("conta_filtro")
             else ""
         )
 
         meses_txt = (
-            f" • Meses {dados['meses_filtro']}"
+            f" · Meses {dados['meses_filtro']}"
             if dados.get("meses_filtro")
             else ""
         )
 
         elementos.append(
             Paragraph(
-                f"{dados['cliente_nome']} • Exercício {dados['ano']}"
-                f"{conta_txt}{meses_txt} • "
-                f"Visão {modo_label} • Gerado em "
+                "Demonstração de Resultado (DRE) · Exercício "
+                f"{dados['ano']}{conta_txt}{meses_txt} · Visão "
+                f"{modo_label} · Gerado em "
                 f"{datetime.now().strftime('%d/%m/%Y')}",
                 subtitulo_style,
             )
@@ -156,6 +188,7 @@ class DrePdfService:
                 dados["meses"],
                 largura,
                 cor_destaque,
+                dados.get("mostrar_subcategorias", False),
             )
         )
 
@@ -169,20 +202,95 @@ class DrePdfService:
                 dados["meses"],
                 largura,
                 cor_destaque,
+                dados.get("mostrar_subcategorias", False),
             )
         )
 
         elementos.append(Spacer(1, 22))
 
-        elementos.append(Paragraph("Resumo Mensal", secao_style))
-
+        # Resumo e título andam juntos: tabela curta quebrada no meio
+        # da página fica com cara de erro.
         elementos.append(
-            DrePdfService._tabela_resumo_mensal(dados, largura)
+            KeepTogether([
+                Paragraph("Resumo Mensal", secao_style),
+                DrePdfService._tabela_resumo_mensal(dados, largura),
+            ])
         )
 
-        doc.build(elementos)
+        doc.build(
+            elementos,
+            onFirstPage=DrePdfService._rodape,
+            onLaterPages=DrePdfService._rodape,
+        )
 
         return buffer.getvalue()
+
+    @staticmethod
+    def _cabecalho_marca(largura):
+        """Marca da Tower à esquerda e a assinatura à direita, separadas
+        da área do relatório por um fio preto."""
+
+        assinatura_style = ParagraphStyle(
+            "DreAssinatura",
+            fontName="Helvetica-Bold",
+            fontSize=8.5,
+            leading=11,
+            textColor=TOWER_GRAFITE,
+            alignment=2,
+            trackingAmount=1.2,
+        )
+
+        marca = ""
+
+        if os.path.exists(MARCA_TOWER):
+            # 137x168 no arquivo: mantém a proporção da marca.
+            marca = Image(MARCA_TOWER, width=19.5, height=24)
+
+        tabela = Table(
+            [[
+                marca,
+                Paragraph(
+                    ASSINATURA_TOWER.upper(),
+                    assinatura_style
+                ),
+            ]],
+            colWidths=[30, largura - 30],
+        )
+
+        tabela.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LEFTPADDING", (0, 0), (-1, -1), 0),
+            ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+            ("TOPPADDING", (0, 0), (-1, -1), 0),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+            ("LINEBELOW", (0, 0), (-1, -1), 1.2, TOWER_TINTA),
+        ]))
+
+        return tabela
+
+    @staticmethod
+    def _rodape(canvas, doc):
+        """Assinatura e número da página no pé de cada folha."""
+
+        canvas.saveState()
+
+        canvas.setFont("Helvetica", 8)
+
+        canvas.setFillColor(TOWER_FUMACA)
+
+        canvas.drawString(
+            doc.leftMargin,
+            18,
+            ASSINATURA_TOWER
+        )
+
+        canvas.drawRightString(
+            doc.pagesize[0] - doc.rightMargin,
+            18,
+            f"Página {canvas.getPageNumber()}"
+        )
+
+        canvas.restoreState()
 
     @staticmethod
     def _cards_resumo(dados, largura):
@@ -218,10 +326,26 @@ class DrePdfService:
                 Paragraph(brl(valor), valor_style(cor_hex)),
             ]
 
+        # Com meses filtrados os totais são do recorte, não do ano —
+        # o rótulo precisa dizer isso.
+        sufixo = (
+            " DO PERÍODO"
+            if dados.get("meses_filtro")
+            else " DO EXERCÍCIO"
+        )
+
         dados_tabela = [[
-            card("RECEITA TOTAL", dados["receita_anual"], "#0f7b6c"),
-            card("DESPESA TOTAL", dados["despesa_anual"], "#e03e3e"),
-            card("RESULTADO", dados["resultado_anual"], "#37352f"),
+            card(
+                f"RECEITA{sufixo}",
+                dados["receita_anual"],
+                "#0f7b6c"
+            ),
+            card(
+                f"DESPESA{sufixo}",
+                dados["despesa_anual"],
+                "#e03e3e"
+            ),
+            card("RESULTADO", dados["resultado_anual"], "#111111"),
         ]]
 
         tabela = Table(dados_tabela, colWidths=[largura / 3] * 3)
@@ -239,18 +363,43 @@ class DrePdfService:
         return tabela
 
     @staticmethod
-    def _tabela_linhas(linhas, meses, largura, cor_destaque):
+    def _tabela_linhas(
+        linhas,
+        meses,
+        largura,
+        cor_destaque,
+        mostrar_subcategorias=False
+    ):
 
         cabecalho = ["Categoria"] + meses + ["Total"]
 
         dados_tabela = [cabecalho]
 
+        # Índices das linhas de subcategoria, pra estilizar depois com um
+        # tom mais claro (a tabela do reportlab é uma matriz; o recuo no
+        # nome é o que mostra a hierarquia).
+        linhas_filhas = []
+
         for linha in linhas:
+
             dados_tabela.append(
                 [linha["nome"]]
                 + [brl(v) for v in linha["valores_mensais"]]
                 + [brl(linha["total"])]
             )
+
+            if not mostrar_subcategorias:
+                continue
+
+            for sub in linha.get("subcategorias") or []:
+
+                linhas_filhas.append(len(dados_tabela))
+
+                dados_tabela.append(
+                    [f"     {sub['nome']}"]
+                    + [brl(v) for v in sub["valores_mensais"]]
+                    + [brl(sub["total"])]
+                )
 
         if not linhas:
             dados_tabela.append(
@@ -267,7 +416,10 @@ class DrePdfService:
         )
 
         return DrePdfService._tabela(
-            dados_tabela, col_widths, cor_destaque=cor_destaque
+            dados_tabela,
+            col_widths,
+            cor_destaque=cor_destaque,
+            linhas_filhas=linhas_filhas,
         )
 
     @staticmethod
@@ -297,7 +449,7 @@ class DrePdfService:
             (
                 "BACKGROUND",
                 (0, 3), (-1, 3),
-                colors.HexColor("#eef2ff")
+                colors.HexColor("#f1f1f1")
             ),
             ("FONTNAME", (0, 3), (-1, 3), "Helvetica-Bold"),
             ("GRID", (0, 0), (-1, -1), 0.5, LINHA),
@@ -313,7 +465,8 @@ class DrePdfService:
         dados_tabela,
         col_widths,
         cor_destaque=None,
-        destacar_ultima_linha=False
+        destacar_ultima_linha=False,
+        linhas_filhas=None
     ):
 
         tabela = Table(
@@ -343,11 +496,23 @@ class DrePdfService:
             ),
         ]
 
+        # Subcategoria: mesma linha, tinta mais clara e sem zebra —
+        # lida como detalhe da categoria logo acima.
+        for indice in (linhas_filhas or []):
+
+            estilo.append((
+                "TEXTCOLOR", (0, indice), (-1, indice), TOWER_FUMACA
+            ))
+
+            estilo.append((
+                "FONTSIZE", (0, indice), (-1, indice), 8
+            ))
+
         if destacar_ultima_linha:
 
             estilo.append((
                 "BACKGROUND", (0, -1), (-1, -1),
-                colors.HexColor("#eef2ff")
+                colors.HexColor("#f1f1f1")
             ))
 
             estilo.append((

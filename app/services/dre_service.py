@@ -642,6 +642,9 @@ class DreService:
             "modo": params.modo,
             "meses": meses_labels,
             "meses_filtro": meses_filtro,
+            "mostrar_subcategorias": bool(
+                getattr(params, "subcategorias", False)
+            ),
             "linhas_receita": linhas_receita,
             "linhas_despesa": linhas_despesa,
             "totais_receita": totais_receita,

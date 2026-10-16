@@ -140,6 +140,52 @@ class PortalEvolucaoMensalSchema(BaseModel):
 
     recebido: Decimal
 
+    # Recebido − pago no mês. Antes era calculado no navegador; vem
+    # pronto pra tela e o gráfico não precisar recalcular.
+    resultado: Decimal = Decimal("0")
+
+
+class PortalResumoMesSchema(BaseModel):
+    """Fechamento de um mês: o que entrou, o que saiu e a diferença."""
+
+    label: str
+
+    recebido: Decimal
+
+    pago: Decimal
+
+    resultado: Decimal
+
+
+class PortalEmAbertoSchema(BaseModel):
+    """O que ainda não foi liquidado (status PENDENTE)."""
+
+    a_pagar: Decimal
+
+    a_receber: Decimal
+
+    a_pagar_vencido: Decimal
+
+    a_receber_vencido: Decimal
+
+
+class PortalVencimentoSchema(BaseModel):
+
+    id: uuid.UUID
+
+    tipo: str
+
+    descricao: str
+
+    valor: Decimal
+
+    vencimento: date
+
+    # Negativo = já venceu.
+    dias: int
+
+    contato_nome: Optional[str] = None
+
 
 class PortalDashboardSchema(BaseModel):
 
@@ -165,3 +211,14 @@ class PortalDashboardSchema(BaseModel):
     maiores_fornecedores: list[PortalBreakdownItemSchema] = []
 
     evolucao_mensal: list[PortalEvolucaoMensalSchema] = []
+
+    # Recortes novos do dashboard: fechamento do mês corrente, do mês
+    # anterior (pra comparação), o que está em aberto e os próximos
+    # vencimentos.
+    mes_atual: Optional[PortalResumoMesSchema] = None
+
+    mes_anterior: Optional[PortalResumoMesSchema] = None
+
+    em_aberto: Optional[PortalEmAbertoSchema] = None
+
+    proximos_vencimentos: list[PortalVencimentoSchema] = []

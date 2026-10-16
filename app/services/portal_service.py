@@ -1,3 +1,5 @@
+from datetime import date
+
 from decimal import Decimal
 
 from app.models.bank_account import BankAccount
@@ -191,16 +193,111 @@ class PortalService:
             receivables_recebidos, "data_recebimento", "recebido"
         )
 
-        evolucao_ordenada = sorted(evolucao_por_mes.items())[-6:]
+        # 12 meses (eram 6): um ano inteiro deixa a sazonalidade visível
+        # e é o período que o cliente costuma comparar. O rótulo leva o
+        # ano porque a janela cruza a virada ("dez/25" e "dez/26" não
+        # podem aparecer iguais).
+        evolucao_ordenada = sorted(evolucao_por_mes.items())[-12:]
 
         evolucao_mensal = [
             {
-                "mes": MESES_PT[mes - 1],
+                "mes": f"{MESES_PT[mes - 1].lower()}/{str(ano)[-2:]}",
                 "pago": valores["pago"],
                 "recebido": valores["recebido"],
+                "resultado": (
+                    valores["recebido"] - valores["pago"]
+                ),
             }
             for (ano, mes), valores in evolucao_ordenada
         ]
+
+        # ------------------------------------------------------------
+        # Fechamento do mês corrente e do anterior (pra comparação)
+        # ------------------------------------------------------------
+
+        hoje = date.today()
+
+        def resumo_do_mes(ano, mes):
+
+            valores = evolucao_por_mes.get(
+                (ano, mes),
+                {"pago": Decimal("0"), "recebido": Decimal("0")}
+            )
+
+            return {
+                "label": f"{MESES_PT[mes - 1].lower()}/{ano}",
+                "recebido": valores["recebido"],
+                "pago": valores["pago"],
+                "resultado": (
+                    valores["recebido"] - valores["pago"]
+                ),
+            }
+
+        mes_atual = resumo_do_mes(hoje.year, hoje.month)
+
+        ano_anterior = hoje.year if hoje.month > 1 else hoje.year - 1
+
+        mes_anterior = resumo_do_mes(
+            ano_anterior,
+            hoje.month - 1 if hoje.month > 1 else 12
+        )
+
+        # ------------------------------------------------------------
+        # Em aberto e próximos vencimentos
+        # ------------------------------------------------------------
+
+        payables_pendentes = db.query(AccountsPayable).filter(
+            AccountsPayable.client_id == client_id,
+            AccountsPayable.status == "PENDENTE"
+        ).all()
+
+        receivables_pendentes = db.query(AccountsReceivable).filter(
+            AccountsReceivable.client_id == client_id,
+            AccountsReceivable.status == "PENDENTE"
+        ).all()
+
+        def soma(itens, vencidos=False):
+
+            return sum(
+                (
+                    item.valor for item in itens
+                    if (not vencidos) or (
+                        item.vencimento and item.vencimento < hoje
+                    )
+                ),
+                Decimal("0")
+            )
+
+        em_aberto = {
+            "a_pagar": soma(payables_pendentes),
+            "a_receber": soma(receivables_pendentes),
+            "a_pagar_vencido": soma(payables_pendentes, True),
+            "a_receber_vencido": soma(receivables_pendentes, True),
+        }
+
+        pendentes = [
+            {
+                "id": item.id,
+                "tipo": tipo,
+                "descricao": item.descricao,
+                "valor": item.valor,
+                "vencimento": item.vencimento,
+                "dias": (item.vencimento - hoje).days,
+                "contato_nome": fornecedores.get(
+                    item.financial_contact_id
+                ),
+            }
+            for tipo, itens in (
+                ("PAGAR", payables_pendentes),
+                ("RECEBER", receivables_pendentes),
+            )
+            for item in itens
+            if item.vencimento
+        ]
+
+        pendentes.sort(key=lambda item: item["vencimento"])
+
+        proximos_vencimentos = pendentes[:8]
 
         return {
             "total_pago": total_pago,
@@ -213,6 +310,10 @@ class PortalService:
             "receitas_por_subcategoria": receitas_por_subcategoria,
             "maiores_fornecedores": maiores_fornecedores,
             "evolucao_mensal": evolucao_mensal,
+            "mes_atual": mes_atual,
+            "mes_anterior": mes_anterior,
+            "em_aberto": em_aberto,
+            "proximos_vencimentos": proximos_vencimentos,
         }
 
     @staticmethod
