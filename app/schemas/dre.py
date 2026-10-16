@@ -13,6 +13,13 @@ ModoDre = Literal["CATEGORIA", "BANCO", "BANCO_CATEGORIA"]
 
 TipoBloco = Literal["RECEITA", "DESPESA"]
 
+# Como a linha entra no relatório:
+#   NORMAL       aparece e soma no resultado;
+#   INFORMATIVO  aparece num quadro à parte, FORA das somas (ex.:
+#                transferência entre contas, aplicação/resgate);
+#   OCULTO       não aparece e não soma.
+ModoLinha = Literal["NORMAL", "INFORMATIVO", "OCULTO"]
+
 
 class DreBlocoConfigSchema(BaseModel):
     """Um bloco/linha do relatório: um nome de exibição agrupando uma ou
@@ -26,6 +33,41 @@ class DreBlocoConfigSchema(BaseModel):
     category_ids: list[uuid.UUID] = []
 
     ordem: int = 0
+
+    modo: ModoLinha = "NORMAL"
+
+
+class DreCategoriaConfigSchema(BaseModel):
+    """Ajuste de uma categoria que não está em nenhum bloco: serve pra
+    tirar do relatório ou jogar no quadro de só-visualização sem
+    precisar criar um bloco só pra ela."""
+
+    category_id: uuid.UUID
+
+    modo: ModoLinha = "NORMAL"
+
+    # Renomeia a categoria só na exibição do relatório.
+    nome_exibicao: Optional[str] = None
+
+
+class DreLinhaManualSchema(BaseModel):
+    """Valor digitado à mão, que não vem de lançamento nenhum: provisão,
+    rateio de outra empresa, estimativa. Fica salvo no modelo, então
+    vale toda vez que o relatório é gerado com ele."""
+
+    nome: str
+
+    tipo: TipoBloco
+
+    valor: Decimal
+
+    # "MM/AAAA" = entra só nesse mês; nulo = repete o valor em todos os
+    # meses do exercício.
+    competencia: Optional[str] = None
+
+    modo: ModoLinha = "NORMAL"
+
+    observacao: Optional[str] = None
 
 
 class DreTemplateCreateSchema(BaseModel):
@@ -43,6 +85,10 @@ class DreTemplateCreateSchema(BaseModel):
 
     blocos: list[DreBlocoConfigSchema] = []
 
+    categorias: list[DreCategoriaConfigSchema] = []
+
+    linhas_manuais: list[DreLinhaManualSchema] = []
+
 
 class DreTemplateUpdateSchema(BaseModel):
 
@@ -53,6 +99,10 @@ class DreTemplateUpdateSchema(BaseModel):
     cor_destaque: Optional[str] = None
 
     blocos: Optional[list[DreBlocoConfigSchema]] = None
+
+    categorias: Optional[list[DreCategoriaConfigSchema]] = None
+
+    linhas_manuais: Optional[list[DreLinhaManualSchema]] = None
 
     ativo: Optional[bool] = None
 
@@ -71,6 +121,10 @@ class DreTemplateResponseSchema(BaseModel):
 
     blocos: list[DreBlocoConfigSchema] = []
 
+    categorias: list[DreCategoriaConfigSchema] = []
+
+    linhas_manuais: list[DreLinhaManualSchema] = []
+
     ativo: bool
 
     model_config = ConfigDict(from_attributes=True)
@@ -88,6 +142,10 @@ class DreTemplateResponseSchema(BaseModel):
             modo=template.modo,
             cor_destaque=template.cor_destaque,
             blocos=(template.config or {}).get("blocos", []),
+            categorias=(template.config or {}).get("categorias", []),
+            linhas_manuais=(
+                (template.config or {}).get("linhas_manuais", [])
+            ),
             ativo=template.ativo,
         )
 
@@ -152,6 +210,12 @@ class DreLinhaSchema(BaseModel):
 
     total: Decimal
 
+    # true = valor digitado no modelo, não veio de lançamento.
+    manual: bool = False
+
+    # Fora das somas (quadro de só-visualização).
+    informativo: bool = False
+
     # Detalhamento opcional por subcategoria, só populado no modo
     # CATEGORIA e só quando a categoria/bloco tem lançamentos com
     # subcategoria definida — o frontend decide se exibe ou não (ver
@@ -180,6 +244,10 @@ class DreResultadoSchema(BaseModel):
     linhas_receita: list[DreLinhaSchema]
 
     linhas_despesa: list[DreLinhaSchema]
+
+    # Linhas marcadas como "só visualização" no modelo: aparecem num
+    # quadro à parte e NÃO entram em receita, despesa nem resultado.
+    linhas_informativas: list[DreLinhaSchema] = []
 
     totais_receita: list[Decimal]
 

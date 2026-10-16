@@ -206,6 +206,36 @@ class DrePdfService:
             )
         )
 
+        informativas = dados.get("linhas_informativas") or []
+
+        if informativas:
+
+            elementos.append(Spacer(1, 22))
+
+            elementos.append(
+                Paragraph("Somente visualização", secao_style)
+            )
+
+            elementos.append(
+                Paragraph(
+                    "Valores acompanhados à parte: não entram em "
+                    "receita, despesa nem no resultado acima.",
+                    subtitulo_style,
+                )
+            )
+
+            elementos.append(Spacer(1, 8))
+
+            elementos.append(
+                DrePdfService._tabela_linhas(
+                    informativas,
+                    dados["meses"],
+                    largura,
+                    cor_destaque,
+                    dados.get("mostrar_subcategorias", False),
+                )
+            )
+
         elementos.append(Spacer(1, 22))
 
         # Resumo e título andam juntos: tabela curta quebrada no meio
@@ -382,8 +412,13 @@ class DrePdfService:
 
         for linha in linhas:
 
+            nome = linha["nome"]
+
+            if linha.get("manual"):
+                nome = f"{nome} (manual)"
+
             dados_tabela.append(
-                [linha["nome"]]
+                [nome]
                 + [brl(v) for v in linha["valores_mensais"]]
                 + [brl(linha["total"])]
             )

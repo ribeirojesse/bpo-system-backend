@@ -1,6 +1,6 @@
 from collections import defaultdict
 
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException
 
@@ -97,7 +97,15 @@ class DreService:
                 "blocos": [
                     bloco.model_dump(mode="json")
                     for bloco in data.blocos
-                ]
+                ],
+                "categorias": [
+                    categoria.model_dump(mode="json")
+                    for categoria in data.categorias
+                ],
+                "linhas_manuais": [
+                    linha.model_dump(mode="json")
+                    for linha in data.linhas_manuais
+                ],
             },
         }
 
@@ -174,9 +182,21 @@ class DreService:
             mode="json"
         )
 
-        if "blocos" in payload:
-            blocos = payload.pop("blocos")
-            payload["config"] = {"blocos": blocos}
+        # O config é uma coluna JSONB só: qualquer uma das três listas
+        # que venha no PUT reescreve o config inteiro, então as outras
+        # duas precisam ser preservadas do que já estava salvo.
+        chaves_config = ("blocos", "categorias", "linhas_manuais")
+
+        if any(chave in payload for chave in chaves_config):
+
+            config = dict(template.config or {})
+
+            for chave in chaves_config:
+
+                if chave in payload:
+                    config[chave] = payload.pop(chave)
+
+            payload["config"] = config
 
         return DreTemplateRepository.update(db, template, payload)
 
@@ -478,11 +498,52 @@ class DreService:
 
         bloco_por_categoria = {}
 
+        # Modo de exibição por NOME de linha (NORMAL / INFORMATIVO /
+        # OCULTO) e renome de categoria avulsa — tudo vindo do modelo.
+        modo_por_linha = {}
+
+        nome_exibicao_categoria = {}
+
+        config = (template.config or {}) if template else {}
+
         if template and params.modo == "CATEGORIA":
 
-            for bloco in (template.config or {}).get("blocos", []):
+            for bloco in config.get("blocos", []):
+
                 for cat_id in bloco.get("category_ids", []):
                     bloco_por_categoria[str(cat_id)] = bloco["nome"]
+
+                modo_por_linha[bloco["nome"]] = (
+                    bloco.get("modo") or "NORMAL"
+                )
+
+            # Categoria fora de bloco: dá pra ocultar ou jogar no quadro
+            # de só-visualização sem precisar criar um bloco pra ela.
+            for ajuste in config.get("categorias", []):
+
+                cat_id = str(ajuste.get("category_id"))
+
+                # `categorias` é indexado por UUID; aqui tudo anda como
+                # string (o config é JSON), então compara por string.
+                nome_atual = {
+                    str(chave): valor
+                    for chave, valor in categorias.items()
+                }.get(cat_id)
+
+                nome = (
+                    ajuste.get("nome_exibicao")
+                    or nome_atual
+                )
+
+                if not nome:
+                    continue
+
+                if ajuste.get("nome_exibicao"):
+                    nome_exibicao_categoria[cat_id] = (
+                        ajuste["nome_exibicao"]
+                    )
+
+                modo_por_linha[nome] = ajuste.get("modo") or "NORMAL"
 
         def nome_linha(item, banco_id):
 
@@ -492,7 +553,11 @@ class DreService:
 
             if params.modo == "CATEGORIA":
                 return bloco_por_categoria.get(
-                    str(item.category_id), categoria_nome
+                    str(item.category_id),
+                    nome_exibicao_categoria.get(
+                        str(item.category_id),
+                        categoria_nome
+                    )
                 )
 
             banco_nome = contas.get(banco_id, "Sem conta vinculada")
@@ -560,6 +625,8 @@ class DreService:
         linhas_receita = []
         linhas_despesa = []
 
+        linhas_informativas = []
+
         for (tipo, nome), valores in acumulado.items():
 
             subcategorias = [
@@ -576,21 +643,105 @@ class DreService:
 
             subcategorias.sort(key=lambda linha: -linha["total"])
 
+            modo_linha = modo_por_linha.get(nome, "NORMAL")
+
+            # Oculto: sai do relatório inteiro — não aparece e não soma.
+            if modo_linha == "OCULTO":
+                continue
+
             linha = {
                 "nome": nome,
                 "tipo": tipo,
                 "valores_mensais": valores,
                 "total": sum(valores),
                 "subcategorias": subcategorias,
+                "manual": False,
+                "informativo": modo_linha == "INFORMATIVO",
             }
 
-            if tipo == "RECEITA":
+            if modo_linha == "INFORMATIVO":
+                linhas_informativas.append(linha)
+
+            elif tipo == "RECEITA":
                 linhas_receita.append(linha)
+
             else:
                 linhas_despesa.append(linha)
 
+        # ------------------------------------------------------------
+        # Linhas manuais do modelo (valor digitado, sem lançamento)
+        # ------------------------------------------------------------
+
+        for manual in config.get("linhas_manuais", []):
+
+            modo_manual = manual.get("modo") or "NORMAL"
+
+            if modo_manual == "OCULTO":
+                continue
+
+            try:
+                valor_manual = Decimal(
+                    str(manual.get("valor") or "0")
+                )
+            except (InvalidOperation, ValueError):
+                continue
+
+            if valor_manual == 0:
+                continue
+
+            valores_manuais = [Decimal("0")] * 12
+
+            competencia = (manual.get("competencia") or "").strip()
+
+            if competencia:
+
+                # "MM/AAAA": entra só nesse mês, e só se for do
+                # exercício que está sendo gerado.
+                partes = competencia.split("/")
+
+                if len(partes) != 2:
+                    continue
+
+                try:
+                    mes_manual = int(partes[0])
+                    ano_manual = int(partes[1])
+                except ValueError:
+                    continue
+
+                if ano_manual != params.ano:
+                    continue
+
+                if not 1 <= mes_manual <= 12:
+                    continue
+
+                valores_manuais[mes_manual - 1] = valor_manual
+
+            else:
+                # Sem competência: repete em todos os meses.
+                valores_manuais = [valor_manual] * 12
+
+            linha_manual = {
+                "nome": manual.get("nome") or "Linha manual",
+                "tipo": manual.get("tipo") or "DESPESA",
+                "valores_mensais": valores_manuais,
+                "total": sum(valores_manuais),
+                "subcategorias": [],
+                "manual": True,
+                "informativo": modo_manual == "INFORMATIVO",
+            }
+
+            if modo_manual == "INFORMATIVO":
+                linhas_informativas.append(linha_manual)
+
+            elif linha_manual["tipo"] == "RECEITA":
+                linhas_receita.append(linha_manual)
+
+            else:
+                linhas_despesa.append(linha_manual)
+
         linhas_receita.sort(key=lambda linha: -linha["total"])
         linhas_despesa.sort(key=lambda linha: -linha["total"])
+        linhas_informativas.sort(key=lambda linha: -linha["total"])
 
         totais_receita = [
             sum(linha["valores_mensais"][m] for linha in linhas_receita)
@@ -630,6 +781,11 @@ class DreService:
                 for linha in linhas_despesa
             ]
 
+            linhas_informativas = [
+                DreService._recortar_linha(linha, indices)
+                for linha in linhas_informativas
+            ]
+
             totais_receita = [totais_receita[i] for i in indices]
 
             totais_despesa = [totais_despesa[i] for i in indices]
@@ -647,6 +803,7 @@ class DreService:
             ),
             "linhas_receita": linhas_receita,
             "linhas_despesa": linhas_despesa,
+            "linhas_informativas": linhas_informativas,
             "totais_receita": totais_receita,
             "totais_despesa": totais_despesa,
             "totais_resultado": totais_resultado,
