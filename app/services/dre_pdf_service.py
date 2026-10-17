@@ -180,6 +180,25 @@ class DrePdfService:
 
         elementos.append(Spacer(1, 22))
 
+        # Quadros digitados no modelo (ex.: "Valores em Aplicação"):
+        # posição de saldos que não são movimento do mês e por isso não
+        # entram em receita, despesa nem resultado. Ficam no topo
+        # porque é a primeira coisa que a diretoria procura.
+        for quadro in (dados.get("quadros") or []):
+
+            elementos.append(
+                KeepTogether(
+                    DrePdfService._quadro_valores(
+                        quadro,
+                        largura,
+                        secao_style,
+                        subtitulo_style,
+                    )
+                )
+            )
+
+            elementos.append(Spacer(1, 22))
+
         elementos.append(Paragraph("Receitas", secao_style))
 
         elementos.append(
@@ -393,6 +412,46 @@ class DrePdfService:
         return tabela
 
     @staticmethod
+    def _quadro_valores(quadro, largura, secao_style, subtitulo_style):
+        """Quadro de valores digitados: nome, valor e um TOTAL. Ocupa
+        pouco mais de um terço da página de propósito — é um anexo da
+        leitura, não uma tabela do DRE."""
+
+        elementos = [Paragraph(quadro["titulo"], secao_style)]
+
+        if quadro.get("referencia"):
+
+            elementos.append(
+                Paragraph(quadro["referencia"], subtitulo_style)
+            )
+
+            elementos.append(Spacer(1, 8))
+
+        dados_tabela = [["Descrição", "Valor"]]
+
+        for linha in quadro.get("linhas", []):
+            dados_tabela.append([linha["nome"], brl(linha["valor"])])
+
+        if quadro.get("mostrar_total", True):
+            dados_tabela.append(["TOTAL", brl(quadro["total"])])
+
+        largura_quadro = largura * 0.42
+
+        tabela = DrePdfService._tabela(
+            dados_tabela,
+            [largura_quadro * 0.62, largura_quadro * 0.38],
+            destacar_ultima_linha=quadro.get("mostrar_total", True),
+        )
+
+        # Tabela estreita: sem isso o reportlab centraliza o flowable na
+        # página e o quadro fica flutuando longe do título.
+        tabela.hAlign = "LEFT"
+
+        elementos.append(tabela)
+
+        return elementos
+
+    @staticmethod
     def _tabela_linhas(
         linhas,
         meses,
@@ -469,6 +528,31 @@ class DrePdfService:
             ["Resultado"] + [brl(v) for v in dados["totais_resultado"]],
         ]
 
+        # Linha do resultado: destacada sempre. Havendo ajustes, ela
+        # deixa de ser a última — vêm os ajustes e, por fim, o
+        # Resultado Final, que passa a ser a linha de leitura.
+        indice_resultado = 3
+
+        ajustes = dados.get("linhas_ajuste") or []
+
+        for ajuste in ajustes:
+
+            sinal = "−" if ajuste.get("operacao") != "SOMAR" else "+"
+
+            linhas.append(
+                [f"{sinal} {ajuste['nome']}"]
+                + [brl(v) for v in ajuste["valores_mensais"]]
+            )
+
+        if ajustes:
+            linhas.append(
+                ["Resultado Final"]
+                + [
+                    brl(v)
+                    for v in dados.get("totais_resultado_final", [])
+                ]
+            )
+
         col_widths = (
             [largura * 0.14]
             + [(largura * 0.86) / len(meses)] * len(meses)
@@ -476,22 +560,53 @@ class DrePdfService:
 
         tabela = Table(linhas, colWidths=col_widths)
 
-        tabela.setStyle(TableStyle([
+        estilo = [
             ("BACKGROUND", (0, 0), (-1, 0), FUNDO_ALT),
             ("TEXTCOLOR", (0, 0), (-1, 0), CINZA_TEXTO),
             ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
             ("FONTSIZE", (0, 0), (-1, -1), 8.5),
-            (
-                "BACKGROUND",
-                (0, 3), (-1, 3),
-                colors.HexColor("#f1f1f1")
-            ),
-            ("FONTNAME", (0, 3), (-1, 3), "Helvetica-Bold"),
             ("GRID", (0, 0), (-1, -1), 0.5, LINHA),
             ("ALIGN", (1, 0), (-1, -1), "RIGHT"),
             ("TOPPADDING", (0, 0), (-1, -1), 6),
             ("BOTTOMPADDING", (0, 0), (-1, -1), 6),
-        ]))
+            (
+                "BACKGROUND",
+                (0, indice_resultado), (-1, indice_resultado),
+                colors.HexColor("#f1f1f1")
+            ),
+            (
+                "FONTNAME",
+                (0, indice_resultado), (-1, indice_resultado),
+                "Helvetica-Bold"
+            ),
+        ]
+
+        if ajustes:
+
+            primeiro_ajuste = indice_resultado + 1
+            ultimo_ajuste = primeiro_ajuste + len(ajustes) - 1
+
+            # Ajuste é conta intermediária: tinta mais clara, pra não
+            # competir com as duas linhas que importam.
+            estilo.append((
+                "TEXTCOLOR",
+                (0, primeiro_ajuste), (-1, ultimo_ajuste),
+                TOWER_FUMACA
+            ))
+
+            estilo.append((
+                "BACKGROUND", (0, -1), (-1, -1), TOWER_TINTA
+            ))
+
+            estilo.append((
+                "TEXTCOLOR", (0, -1), (-1, -1), colors.white
+            ))
+
+            estilo.append((
+                "FONTNAME", (0, -1), (-1, -1), "Helvetica-Bold"
+            ))
+
+        tabela.setStyle(TableStyle(estilo))
 
         return tabela
 

@@ -106,6 +106,14 @@ class DreService:
                     linha.model_dump(mode="json")
                     for linha in data.linhas_manuais
                 ],
+                "quadros": [
+                    quadro.model_dump(mode="json")
+                    for quadro in data.quadros
+                ],
+                "ajustes": [
+                    ajuste.model_dump(mode="json")
+                    for ajuste in data.ajustes
+                ],
             },
         }
 
@@ -182,10 +190,16 @@ class DreService:
             mode="json"
         )
 
-        # O config é uma coluna JSONB só: qualquer uma das três listas
-        # que venha no PUT reescreve o config inteiro, então as outras
-        # duas precisam ser preservadas do que já estava salvo.
-        chaves_config = ("blocos", "categorias", "linhas_manuais")
+        # O config é uma coluna JSONB só: qualquer uma das listas que
+        # venha no PUT reescreve o config inteiro, então as demais
+        # precisam ser preservadas do que já estava salvo.
+        chaves_config = (
+            "blocos",
+            "categorias",
+            "linhas_manuais",
+            "quadros",
+            "ajustes",
+        )
 
         if any(chave in payload for chave in chaves_config):
 
@@ -545,6 +559,41 @@ class DreService:
 
                 modo_por_linha[nome] = ajuste.get("modo") or "NORMAL"
 
+        # ------------------------------------------------------------
+        # Ajustes do resultado (ex.: "Fundo Não Utilizável")
+        # ------------------------------------------------------------
+        #
+        # Cada ajuste soma entradas e subtrai saídas das categorias
+        # marcadas, mês a mês, e o saldo é abatido (ou somado) do
+        # resultado no fim — virando a linha "Resultado Final" do
+        # resumo. O cálculo é feito sobre os lançamentos crus, de
+        # propósito: a categoria pode estar oculta, informativa ou
+        # normal nas tabelas, e isso não muda o ajuste.
+
+        ajustes_config = config.get("ajustes", []) if template else []
+
+        # {str(category_id): [índices dos ajustes que a usam]}
+        ajustes_por_categoria = defaultdict(list)
+
+        for indice, ajuste in enumerate(ajustes_config):
+
+            for cat_id in ajuste.get("category_ids", []):
+                ajustes_por_categoria[str(cat_id)].append(indice)
+
+        ajuste_valores = [
+            [Decimal("0")] * 12 for _ in ajustes_config
+        ]
+
+        def acumula_ajuste(category_id, mes, valor_com_sinal):
+
+            if not ajustes_por_categoria:
+                return
+
+            for indice in ajustes_por_categoria.get(
+                str(category_id), []
+            ):
+                ajuste_valores[indice][mes] += valor_com_sinal
+
         def nome_linha(item, banco_id):
 
             categoria_nome = categorias.get(
@@ -606,6 +655,8 @@ class DreService:
 
             acumulado[("DESPESA", nome)][mes] += p.valor
 
+            acumula_ajuste(p.category_id, mes, -p.valor)
+
             acumula_subcategoria(p, "DESPESA", nome)
 
         for r in receivables:
@@ -619,6 +670,8 @@ class DreService:
             ).month - 1
 
             acumulado[("RECEITA", nome)][mes] += r.valor
+
+            acumula_ajuste(r.category_id, mes, r.valor)
 
             acumula_subcategoria(r, "RECEITA", nome)
 
@@ -757,6 +810,76 @@ class DreService:
             totais_receita[m] - totais_despesa[m] for m in range(12)
         ]
 
+        # Linhas de ajuste + resultado final. Sem ajuste no modelo, o
+        # resultado final é o próprio resultado (o PDF, nesse caso, nem
+        # imprime as linhas extras).
+        linhas_ajuste = []
+
+        totais_resultado_final = list(totais_resultado)
+
+        for indice, ajuste in enumerate(ajustes_config):
+
+            valores_ajuste = ajuste_valores[indice]
+
+            if all(valor == 0 for valor in valores_ajuste):
+                continue
+
+            operacao = ajuste.get("operacao") or "SUBTRAIR"
+
+            linhas_ajuste.append({
+                "nome": ajuste.get("nome") or "Ajuste",
+                "valores_mensais": valores_ajuste,
+                "total": sum(valores_ajuste),
+                "operacao": operacao,
+            })
+
+            for m in range(12):
+
+                if operacao == "SOMAR":
+                    totais_resultado_final[m] += valores_ajuste[m]
+                else:
+                    totais_resultado_final[m] -= valores_ajuste[m]
+
+        # Quadros digitados no modelo: valor fixo, fora da grade
+        # mensal — o backend só soma o total e repassa.
+        quadros = []
+
+        for quadro in (config.get("quadros", []) if template else []):
+
+            linhas_quadro = []
+
+            for linha_quadro in quadro.get("linhas", []):
+
+                try:
+                    valor_quadro = Decimal(
+                        str(linha_quadro.get("valor") or "0")
+                    )
+                except (InvalidOperation, ValueError):
+                    continue
+
+                nome_quadro = (linha_quadro.get("nome") or "").strip()
+
+                if not nome_quadro and valor_quadro == 0:
+                    continue
+
+                linhas_quadro.append({
+                    "nome": nome_quadro or "Sem nome",
+                    "valor": valor_quadro,
+                })
+
+            if not linhas_quadro:
+                continue
+
+            quadros.append({
+                "titulo": quadro.get("titulo") or "Valores em Aplicação",
+                "referencia": quadro.get("referencia") or None,
+                "linhas": linhas_quadro,
+                "total": sum(
+                    linha["valor"] for linha in linhas_quadro
+                ),
+                "mostrar_total": quadro.get("mostrar_total", True),
+            })
+
         meses_labels = MESES
 
         meses_filtro = None
@@ -792,6 +915,25 @@ class DreService:
 
             totais_resultado = [totais_resultado[i] for i in indices]
 
+            totais_resultado_final = [
+                totais_resultado_final[i] for i in indices
+            ]
+
+            # Ajuste não tem subcategoria: recorta direto, sem passar
+            # por _recortar_linha (que devolveria uma chave vazia).
+            linhas_ajuste = [
+                {
+                    **linha,
+                    "valores_mensais": [
+                        linha["valores_mensais"][i] for i in indices
+                    ],
+                    "total": sum(
+                        linha["valores_mensais"][i] for i in indices
+                    ),
+                }
+                for linha in linhas_ajuste
+            ]
+
         return {
             "cliente_nome": client.nome_fantasia or client.razao_social,
             "ano": params.ano,
@@ -807,9 +949,13 @@ class DreService:
             "totais_receita": totais_receita,
             "totais_despesa": totais_despesa,
             "totais_resultado": totais_resultado,
+            "quadros": quadros,
+            "linhas_ajuste": linhas_ajuste,
+            "totais_resultado_final": totais_resultado_final,
             "receita_anual": sum(totais_receita),
             "despesa_anual": sum(totais_despesa),
             "resultado_anual": sum(totais_resultado),
+            "resultado_final_anual": sum(totais_resultado_final),
             "cor_destaque": template.cor_destaque if template else None,
             "conta_filtro": conta_filtro,
         }

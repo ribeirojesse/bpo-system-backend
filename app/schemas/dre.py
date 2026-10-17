@@ -70,6 +70,56 @@ class DreLinhaManualSchema(BaseModel):
     observacao: Optional[str] = None
 
 
+class DreQuadroLinhaSchema(BaseModel):
+    """Uma linha de quadro digitada à mão (ex.: "Sicredi" /
+    203.105,60)."""
+
+    nome: str
+
+    valor: Decimal
+
+
+class DreQuadroSchema(BaseModel):
+    """Quadro de valores digitados, fora da grade mensal — nasceu do
+    "Valores em Aplicação" que o usuário montava à mão no script antigo
+    (saldo de cada aplicação na data do fechamento). Só sai no PDF, e
+    nunca entra em receita, despesa ou resultado."""
+
+    titulo: str = "Valores em Aplicação"
+
+    # Texto livre no subtítulo do quadro (ex.: "Posição em
+    # 21/09/2026").
+    referencia: Optional[str] = None
+
+    linhas: list[DreQuadroLinhaSchema] = []
+
+    # false = esconde a linha de TOTAL (quadro de um item só, por ex.).
+    mostrar_total: bool = True
+
+
+class DreAjusteSchema(BaseModel):
+    """Ajuste do resultado: pega os lançamentos de certas categorias,
+    faz entradas − saídas mês a mês e abate (ou soma) esse saldo do
+    resultado, gerando a linha "Resultado Final" no resumo.
+
+    É o caso do "Fundo Não Utilizável" da APAE: dinheiro que entrou mas
+    não pode ser usado, então não deveria contar como resultado do mês.
+
+    O saldo é calculado sobre os lançamentos das categorias marcadas
+    INDEPENDENTEMENTE de elas aparecerem nas tabelas — quem decide isso
+    é o modo da categoria (NORMAL / INFORMATIVO / OCULTO). Marcar a
+    categoria como "Só visualização" e usá-la num ajuste é a combinação
+    que tira o valor do resultado e ainda mostra quanto foi."""
+
+    nome: str
+
+    category_ids: list[uuid.UUID] = []
+
+    # SUBTRAIR: Resultado Final = Resultado − saldo do ajuste.
+    # SOMAR:    Resultado Final = Resultado + saldo do ajuste.
+    operacao: Literal["SUBTRAIR", "SOMAR"] = "SUBTRAIR"
+
+
 class DreTemplateCreateSchema(BaseModel):
 
     # Nulo = modelo "padrão da carteira" (só ADMIN pode criar assim; o
@@ -89,6 +139,10 @@ class DreTemplateCreateSchema(BaseModel):
 
     linhas_manuais: list[DreLinhaManualSchema] = []
 
+    quadros: list[DreQuadroSchema] = []
+
+    ajustes: list[DreAjusteSchema] = []
+
 
 class DreTemplateUpdateSchema(BaseModel):
 
@@ -103,6 +157,10 @@ class DreTemplateUpdateSchema(BaseModel):
     categorias: Optional[list[DreCategoriaConfigSchema]] = None
 
     linhas_manuais: Optional[list[DreLinhaManualSchema]] = None
+
+    quadros: Optional[list[DreQuadroSchema]] = None
+
+    ajustes: Optional[list[DreAjusteSchema]] = None
 
     ativo: Optional[bool] = None
 
@@ -125,6 +183,10 @@ class DreTemplateResponseSchema(BaseModel):
 
     linhas_manuais: list[DreLinhaManualSchema] = []
 
+    quadros: list[DreQuadroSchema] = []
+
+    ajustes: list[DreAjusteSchema] = []
+
     ativo: bool
 
     model_config = ConfigDict(from_attributes=True)
@@ -146,6 +208,8 @@ class DreTemplateResponseSchema(BaseModel):
             linhas_manuais=(
                 (template.config or {}).get("linhas_manuais", [])
             ),
+            quadros=(template.config or {}).get("quadros", []),
+            ajustes=(template.config or {}).get("ajustes", []),
             ativo=template.ativo,
         )
 
@@ -223,6 +287,33 @@ class DreLinhaSchema(BaseModel):
     subcategorias: list["DreLinhaSchema"] = []
 
 
+class DreQuadroResultadoSchema(BaseModel):
+    """Quadro digitado, já com o total somado pelo backend."""
+
+    titulo: str
+
+    referencia: Optional[str] = None
+
+    linhas: list[DreQuadroLinhaSchema] = []
+
+    total: Decimal
+
+    mostrar_total: bool = True
+
+
+class DreAjusteResultadoSchema(BaseModel):
+    """Saldo mensal de um ajuste (entradas − saídas das categorias
+    marcadas) e como ele entra no Resultado Final."""
+
+    nome: str
+
+    valores_mensais: list[Decimal]
+
+    total: Decimal
+
+    operacao: Literal["SUBTRAIR", "SOMAR"] = "SUBTRAIR"
+
+
 class DreResultadoSchema(BaseModel):
 
     cliente_nome: str
@@ -255,11 +346,23 @@ class DreResultadoSchema(BaseModel):
 
     totais_resultado: list[Decimal]
 
+    # Quadros digitados no modelo (hoje só renderizados no PDF).
+    quadros: list[DreQuadroResultadoSchema] = []
+
+    # Ajustes do modelo e o resultado depois deles. Quando não há
+    # ajuste nenhum, `linhas_ajuste` vem vazia e
+    # `totais_resultado_final` repete `totais_resultado`.
+    linhas_ajuste: list[DreAjusteResultadoSchema] = []
+
+    totais_resultado_final: list[Decimal] = []
+
     receita_anual: Decimal
 
     despesa_anual: Decimal
 
     resultado_anual: Decimal
+
+    resultado_final_anual: Decimal = Decimal("0")
 
     cor_destaque: Optional[str] = None
 
